@@ -51,3 +51,13 @@ variable "argocd_chart_version" {
   type    = string
   default = "9.4.2"
 }
+
+variable "argocd_domain" {
+  type        = string
+  description = "Full hostname for ArgoCD, e.g. argocd.devtools-labs.example.com"
+}
+
+variable "hosted_zone_name" {
+  type        = string
+  description = "Route53 hosted zone that owns the argocd_domain, e.g. example.com"
+}

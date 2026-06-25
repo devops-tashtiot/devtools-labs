@@ -1,6 +1,7 @@
-# Bootstrap ArgoCD using the official Helm chart.
-# ArgoCD then self-manages via the ApplicationSet below,
-# pulling its own umbrella chart from devtools-provisions and values from devtools-definition.
+# Bootstrap ArgoCD using the official Helm chart with a LoadBalancer service so Terraform
+# can read the NLB hostname and create the Route53 CNAME in the same apply.
+# ArgoCD then self-manages via the ApplicationSet below, keeping its config in sync with
+# devtools-provisions (chart) + devtools-definition (env values).
 resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -14,7 +15,7 @@ resource "helm_release" "argocd" {
   values = [
     yamlencode({
       global = {
-        domain = "localhost"
+        domain = var.argocd_domain
       }
       configs = {
         params = {
@@ -37,8 +38,14 @@ resource "helm_release" "argocd" {
         }
       }
       server = {
-        service    = { type = "ClusterIP" }
-        extraArgs  = ["--insecure"]
+        service = {
+          type = "LoadBalancer"
+          annotations = {
+            "service.beta.kubernetes.io/aws-load-balancer-type"   = "nlb"
+            "service.beta.kubernetes.io/aws-load-balancer-scheme" = "internet-facing"
+          }
+        }
+        extraArgs = ["--insecure"]
         resources = {
           requests = { cpu = "50m", memory = "128Mi" }
           limits   = { cpu = "200m", memory = "256Mi" }
@@ -78,6 +85,31 @@ resource "helm_release" "argocd" {
   ]
 
   depends_on = [data.aws_eks_cluster.this]
+}
+
+# Read the NLB hostname that the AWS cloud-controller assigns to the argocd-server Service.
+# If this data source fails because AWS hasn't finished provisioning the NLB yet,
+# re-run: terragrunt apply
+data "kubernetes_service" "argocd_server" {
+  metadata {
+    name      = "argocd-server"
+    namespace = "argocd"
+  }
+  depends_on = [helm_release.argocd]
+}
+
+# Route53 CNAME: argocd_domain → NLB hostname
+data "aws_route53_zone" "this" {
+  name         = var.hosted_zone_name
+  private_zone = false
+}
+
+resource "aws_route53_record" "argocd" {
+  zone_id = data.aws_route53_zone.this.zone_id
+  name    = var.argocd_domain
+  type    = "CNAME"
+  ttl     = 300
+  records = [data.kubernetes_service.argocd_server.status[0].load_balancer[0].ingress[0].hostname]
 }
 
 # ApplicationSet: ArgoCD scans charts/* in devtools-provisions and deploys each tool.

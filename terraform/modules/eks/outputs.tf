@@ -7,13 +7,18 @@ output "cluster_endpoint" {
 }
 
 output "kubeconfig_command" {
-  description = "Run this to configure kubectl for the cluster"
+  description = "Configure kubectl for the cluster"
   value       = "aws eks update-kubeconfig --name ${var.cluster_name} --region ${var.aws_region} --profile ${var.aws_profile}"
 }
 
-output "argocd_portforward_command" {
-  description = "Access ArgoCD UI at http://localhost:8080 (free, no LB needed)"
-  value       = "kubectl port-forward svc/argocd-server -n argocd 8080:80"
+output "argocd_url" {
+  description = "ArgoCD UI — accessible from your laptop"
+  value       = "http://${var.argocd_domain}"
+}
+
+output "argocd_nlb_hostname" {
+  description = "Raw NLB hostname (the CNAME target)"
+  value       = data.kubernetes_service.argocd_server.status[0].load_balancer[0].ingress[0].hostname
 }
 
 output "argocd_initial_password_command" {
