@@ -8,8 +8,8 @@ output "kubeconfig_command" {
 }
 
 output "argocd_url" {
-  description = "Open this in your browser — no load balancer, no domain needed"
-  value       = "http://${data.aws_instances.eks_nodes.public_ips[0]}:30080"
+  description = "Open this in your browser to access ArgoCD"
+  value       = "http://${data.kubernetes_service.argocd_server.status[0].load_balancer[0].ingress[0].hostname}"
 }
 
 output "argocd_initial_password_command" {
