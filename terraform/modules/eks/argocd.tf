@@ -32,11 +32,8 @@ resource "helm_release" "argocd" {
       }
       server = {
         service = {
-          type = "LoadBalancer"
-          annotations = {
-            "service.beta.kubernetes.io/aws-load-balancer-type"   = "nlb"
-            "service.beta.kubernetes.io/aws-load-balancer-scheme" = "internet-facing"
-          }
+          type         = "NodePort"
+          nodePortHttp = 30080
         }
         extraArgs = ["--insecure"]
         resources = {
@@ -80,18 +77,6 @@ resource "helm_release" "argocd" {
   depends_on = [data.aws_eks_cluster.this]
 }
 
-# Read the NLB hostname AWS assigns after the helm_release creates the LoadBalancer service.
-# If this is empty on first apply (AWS still provisioning), re-run: terragrunt apply
-data "kubernetes_service" "argocd_server" {
-  metadata {
-    name      = "argocd-server"
-    namespace = "argocd"
-  }
-  depends_on = [helm_release.argocd]
-}
-
-# ApplicationSet: watches charts/* in devtools-provisions and deploys each tool,
-# merging base values (provisions) with env overrides (definition).
 resource "kubernetes_manifest" "devtools_appset" {
   manifest = {
     apiVersion = "argoproj.io/v1alpha1"
