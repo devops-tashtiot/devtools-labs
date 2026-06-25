@@ -1,7 +1,3 @@
-# Bootstrap ArgoCD using the official Helm chart with a LoadBalancer service so Terraform
-# can read the NLB hostname and create the Route53 CNAME in the same apply.
-# ArgoCD then self-manages via the ApplicationSet below, keeping its config in sync with
-# devtools-provisions (chart) + devtools-definition (env values).
 resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -14,9 +10,6 @@ resource "helm_release" "argocd" {
 
   values = [
     yamlencode({
-      global = {
-        domain = var.argocd_domain
-      }
       configs = {
         params = {
           "server.insecure" = true
@@ -87,9 +80,8 @@ resource "helm_release" "argocd" {
   depends_on = [data.aws_eks_cluster.this]
 }
 
-# Read the NLB hostname that the AWS cloud-controller assigns to the argocd-server Service.
-# If this data source fails because AWS hasn't finished provisioning the NLB yet,
-# re-run: terragrunt apply
+# Read the NLB hostname AWS assigns after the helm_release creates the LoadBalancer service.
+# If this is empty on first apply (AWS still provisioning), re-run: terragrunt apply
 data "kubernetes_service" "argocd_server" {
   metadata {
     name      = "argocd-server"
@@ -98,22 +90,8 @@ data "kubernetes_service" "argocd_server" {
   depends_on = [helm_release.argocd]
 }
 
-# Route53 CNAME: argocd_domain → NLB hostname
-data "aws_route53_zone" "this" {
-  name         = var.hosted_zone_name
-  private_zone = false
-}
-
-resource "aws_route53_record" "argocd" {
-  zone_id = data.aws_route53_zone.this.zone_id
-  name    = var.argocd_domain
-  type    = "CNAME"
-  ttl     = 300
-  records = [data.kubernetes_service.argocd_server.status[0].load_balancer[0].ingress[0].hostname]
-}
-
-# ApplicationSet: ArgoCD scans charts/* in devtools-provisions and deploys each tool.
-# For each chart, values are merged from devtools-provisions (base) + devtools-definition (env overrides).
+# ApplicationSet: watches charts/* in devtools-provisions and deploys each tool,
+# merging base values (provisions) with env overrides (definition).
 resource "kubernetes_manifest" "devtools_appset" {
   manifest = {
     apiVersion = "argoproj.io/v1alpha1"

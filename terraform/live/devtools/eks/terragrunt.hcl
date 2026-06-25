@@ -20,7 +20,4 @@ inputs = {
   argocd_provisions_repo = "https://github.com/devops-tashtiot/devtools-provisions"
   argocd_definition_repo = "https://github.com/devops-tashtiot/devtools-definition"
   argocd_chart_version   = "9.4.2"
-
-  argocd_domain    = "argocd.devtools-labs.example.com"
-  hosted_zone_name = "example.com"
 }
