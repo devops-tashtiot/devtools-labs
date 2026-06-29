@@ -17,7 +17,8 @@ inputs = {
   node_min_size      = 1
   node_max_size      = 2
 
-  argocd_provisions_repo = "https://github.com/devops-tashtiot/devtools-provisions"
-  argocd_definition_repo = "https://github.com/devops-tashtiot/devtools-definition"
-  argocd_chart_version   = "9.4.2"
+  node_key_pair_name = "devtools-eks-nodes"
+
+  vpc_id            = ""
+  subnet_tag_filter = "spokeSubnet"
 }

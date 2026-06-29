@@ -39,16 +39,23 @@ variable "node_max_size" {
   default = 2
 }
 
-variable "argocd_provisions_repo" {
-  type = string
+variable "node_key_pair_name" {
+  description = "Existing EC2 key pair name to enable SSH access to EKS nodes. Leave empty to disable SSH."
+  type        = string
+  default     = ""
 }
 
-variable "argocd_definition_repo" {
-  type = string
+variable "vpc_id" {
+  description = "Explicit VPC ID to deploy into. Leave empty to auto-discover the first VPC in the account."
+  type        = string
+  default     = ""
 }
 
-variable "argocd_chart_version" {
-  type    = string
-  default = "9.4.2"
+variable "subnet_tag_filter" {
+  description = "Tag Name filter to find the target subnets (matched via wildcard). EKS uses all matching subnets."
+  type        = string
+  default     = "spokeSubnet"
 }
+
+
 

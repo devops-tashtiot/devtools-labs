@@ -76,8 +76,6 @@ resource "helm_release" "argocd" {
       notifications = { enabled = false }
     })
   ]
-
-  depends_on = [data.aws_eks_cluster.this]
 }
 
 # Read the NLB hostname AWS assigns to the argocd-server LoadBalancer service.
