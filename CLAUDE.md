@@ -15,26 +15,15 @@ terragrunt destroy
 
 ```
 terraform/
-├── root.hcl                         # Shared: AWS provider, S3 remote state config
-├── live/
-│   └── devtools/
-│       ├── eks/
-│       │   └── terragrunt.hcl       # Cluster inputs (name, version, node type)
-│       └── argocd/
-│           └── terragrunt.hcl       # ArgoCD inputs; dependency on eks unit
+├── root.hcl                    # Shared: AWS provider, S3 remote state config
+├── live/devtools/
+│   ├── eks/                    # terragrunt.hcl — cluster inputs
+│   ├── argocd/                 # terragrunt.hcl — depends on eks
+│   └── argocd-ingress/         # terragrunt.hcl — depends on eks + argocd
 └── modules/
-    ├── eks/                         # VPC + EKS cluster only
-    │   ├── main.tf                  # VPC + EKS managed node group
-    │   ├── providers.tf             # AWS provider
-    │   ├── variables.tf             # Cluster variables
-    │   ├── outputs.tf               # cluster_name, cluster_endpoint, cluster_certificate_authority, kubeconfig_command
-    │   └── versions.tf              # AWS provider constraint
-    └── argocd/                      # ArgoCD Helm install + ApplicationSet
-        ├── main.tf                  # helm_release argocd + kubernetes_manifest ApplicationSet
-        ├── providers.tf             # Helm/Kubernetes providers (configured from input variables)
-        ├── variables.tf             # cluster_endpoint, cluster_certificate_authority, repo URLs
-        ├── outputs.tf               # argocd_url, argocd_initial_password_command
-        └── versions.tf              # Helm + Kubernetes provider constraints
+    ├── eks/                    # VPC lookup + EKS managed node group
+    ├── argocd/                 # Helm: argo-cd chart + ApplicationSet
+    └── argocd-ingress/         # Helm: nginx-ingress; K8s: cloudflared + ArgoCD Ingress
 ```
 
 ## Three-Repo GitOps Architecture
@@ -52,47 +41,77 @@ ArgoCD's ApplicationSet (defined in `argocd.tf`) auto-discovers every directory 
 ## What the Modules Provision
 
 **eks module:**
-1. VPC — public subnets only; NAT Gateway disabled (not free-tier)
-2. EKS cluster — v1.31, public endpoint, single `t3.medium` managed node group
+1. Uses existing spoke VPC (`vpc-0c5eaad2eb2976b41`) — private subnets only (`map_public_ip_on_launch = false`), no NAT Gateway
+2. All outbound traffic routes through a Gateway Load Balancer endpoint (`vpce-063335608106cb20a`) to a centralized hub firewall/inspection layer
+3. EKS cluster — v1.31, public endpoint, single `t3.medium` managed node group
 
 **argocd module:**
-3. ArgoCD — installed via Helm (chart v9.4.2), exposed as an internet-facing NLB
+3. ArgoCD — installed via Helm (chart v9.4.2), `ClusterIP` only (no load balancer)
 4. ApplicationSet — wires the two GitOps repos for auto-discovery of tools
+
+**argocd-ingress module:**
+5. `nginx-ingress` controller — `ClusterIP`, routes by `Host` header
+6. `cloudflared` Deployment — dials out to Cloudflare edge, forwards traffic to nginx-ingress
+7. `Ingress` resource — routes `argocd.devopstashtiot.page` → `argocd-server`
+
+## Prerequisites
+
+1. **Cloudflare tunnel credentials in S3** — upload once before first apply:
+   ```bash
+   aws s3 cp ~/.cloudflared/<tunnel-id>.json \
+     s3://terraform-state-342831714456/cloudflare/devtools-labs-tunnel.json \
+     --profile 342831714456_Workload-Admin-PS
+   ```
+2. **Cloudflare DNS CNAME** — each subdomain must point to `7de872ce-2826-42fb-9aea-325e10e3e5fc.cfargotunnel.com` (see parent `CLAUDE.md` for the API call).
 
 ## Apply Workflow
 
-The two units are independent Terragrunt configs. Terragrunt's `dependency` block in the `argocd` unit reads the cluster endpoint/cert from the `eks` unit's outputs, so there is no `-target` hack needed.
+Dependency chain is `eks → argocd → argocd-ingress`. Run all at once:
 
-```bash
-# Step 1 — provision the EKS cluster
-cd terraform/live/devtools/eks
-terragrunt apply
-
-# Step 2 — install ArgoCD (reads cluster outputs via dependency block)
-cd terraform/live/devtools/argocd
-terragrunt apply
-```
-
-Or run both at once from the parent directory:
 ```bash
 cd terraform/live/devtools
 terragrunt run-all apply
 ```
 
-## Useful Outputs
+Or step by step:
+```bash
+cd terraform/live/devtools/eks           && terragrunt apply  # ~15-20 min
+cd terraform/live/devtools/argocd        && terragrunt apply  # ~5-10 min
+cd terraform/live/devtools/argocd-ingress && terragrunt apply # ~3-5 min
+```
+
+**ArgoCD:** `https://argocd.devopstashtiot.page` — user `admin`, password `123456`.
+
+## Adding a New Service
+
+1. Add a Cloudflare DNS CNAME for `mytool.devopstashtiot.page` (parent `CLAUDE.md`).
+2. Deploy the service to the cluster.
+3. Apply a Kubernetes `Ingress`:
+   ```yaml
+   metadata:
+     annotations:
+       nginx.ingress.kubernetes.io/ssl-redirect: "false"
+   spec:
+     ingressClassName: nginx
+     rules:
+       - host: mytool.devopstashtiot.page
+         http:
+           paths:
+             - path: /
+               pathType: Prefix
+               backend:
+                 service: { name: mytool-svc, port: { number: 80 } }
+   ```
+
+## Useful Commands
 
 ```bash
-# Configure kubectl (from eks unit)
-cd terraform/live/devtools/eks
-terragrunt output -raw kubeconfig_command | bash
+# Configure kubectl
+cd terraform/live/devtools/eks && terragrunt output -raw kubeconfig_command | bash
 
-# Get ArgoCD URL (from argocd unit)
-cd terraform/live/devtools/argocd
-terragrunt output argocd_url
-
-# Get ArgoCD admin password
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d && echo
+# Check pods
+kubectl get pods -n argocd
+kubectl get pods -n kube-system | grep -E "nginx|cloudflared"
 ```
 
 ## AWS Account & Region
@@ -106,7 +125,8 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
 
 ## Key Design Decisions
 
-- **No NAT Gateway** — nodes run in public subnets with `map_public_ip_on_launch = true` to avoid NAT Gateway costs
-- **ArgoCD runs insecure** (`--insecure` flag) — TLS is terminated at the NLB; acceptable for a dev platform
+- **Private subnets, no NAT Gateway** — nodes run in private subnets (`map_public_ip_on_launch = false`); all egress goes through a Gateway Load Balancer endpoint to a hub VPC firewall. Worker nodes must reach AWS APIs (EKS, ECR, STS, S3) either via the hub or via VPC endpoints — if the hub blocks this, nodes will fail to bootstrap
+- **No AWS load balancer** — `cloudflared` dials out to Cloudflare; `nginx-ingress` is ClusterIP. Zero LB cost.
+- **ArgoCD runs insecure** (`--insecure` flag) — TLS is terminated at Cloudflare; acceptable for a dev platform
 - **Two-source ApplicationSet** — the provision repo owns chart structure; the definition repo owns env-specific values, keeping configuration separate from packaging
 - **Split Terragrunt units** — `eks` and `argocd` are separate units; the `argocd` unit's `dependency` block reads cluster outputs at plan time, so providers are always configured from real values with no `-target` workaround needed

@@ -57,5 +57,11 @@ variable "subnet_tag_filter" {
   default     = "spokeSubnet"
 }
 
+variable "larger_node_instance_type" {
+  description = "Instance type for the node group."
+  type        = string
+  default     = "t3.xlarge"
+}
+
 
 

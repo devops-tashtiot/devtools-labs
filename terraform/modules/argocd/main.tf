@@ -17,6 +17,10 @@ resource "helm_release" "argocd" {
         cm = {
           "accounts.admin" = "apiKey, login"
         }
+        secret = {
+          argocdServerAdminPassword      = "$2a$10$OlAKK08KRfEsdW5lAbvBIuehF6oXILP1C0YKYup7OoXCOwj0/Wi5C"
+          argocdServerAdminPasswordMtime = "2024-01-01T00:00:00Z"
+        }
         repositories = {
           devtools-provisions = {
             url  = var.argocd_provisions_repo
@@ -32,11 +36,7 @@ resource "helm_release" "argocd" {
       }
       server = {
         service = {
-          type = "LoadBalancer"
-          annotations = {
-            "service.beta.kubernetes.io/aws-load-balancer-type"   = "nlb"
-            "service.beta.kubernetes.io/aws-load-balancer-scheme" = "internet-facing"
-          }
+          type = "ClusterIP"
         }
         extraArgs = ["--insecure"]
         resources = {
@@ -78,76 +78,37 @@ resource "helm_release" "argocd" {
   ]
 }
 
-# Read the NLB hostname AWS assigns to the argocd-server LoadBalancer service.
-# If empty on first apply (AWS still provisioning the NLB), re-run: terragrunt apply
-data "kubernetes_service" "argocd_server" {
-  metadata {
-    name      = "argocd-server"
-    namespace = "argocd"
-  }
-  depends_on = [helm_release.argocd]
-}
 
-resource "kubernetes_manifest" "devtools_appset" {
-  manifest = {
+resource "kubectl_manifest" "devtools_app" {
+  yaml_body = yamlencode({
     apiVersion = "argoproj.io/v1alpha1"
-    kind       = "ApplicationSet"
+    kind       = "Application"
     metadata = {
-      name      = "devtools"
+      name      = "devtools-applicationset"
       namespace = "argocd"
     }
     spec = {
-      generators = [
-        {
-          git = {
-            repoURL  = var.argocd_provisions_repo
-            revision = "main"
-            directories = [
-              { path = "charts/*" }
-            ]
-          }
+      project = "default"
+      source = {
+        repoURL        = var.argocd_definition_repo
+        targetRevision = "main"
+        path           = "."
+        directory = {
+          include = "applicationset.yaml"
         }
-      ]
-      template = {
-        metadata = {
-          name      = "{{path.basename}}"
-          namespace = "argocd"
-        }
-        spec = {
-          project = "default"
-          sources = [
-            {
-              repoURL        = var.argocd_provisions_repo
-              targetRevision = "main"
-              path           = "{{path}}"
-              helm = {
-                valueFiles = [
-                  "values.yaml",
-                  "$definition/devtools/{{path.basename}}/values.yaml",
-                ]
-              }
-            },
-            {
-              repoURL        = var.argocd_definition_repo
-              targetRevision = "main"
-              ref            = "definition"
-            },
-          ]
-          destination = {
-            server    = "https://kubernetes.default.svc"
-            namespace = "{{path.basename}}"
-          }
-          syncPolicy = {
-            automated = {
-              prune    = true
-              selfHeal = true
-            }
-            syncOptions = ["CreateNamespace=true"]
-          }
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = "argocd"
+      }
+      syncPolicy = {
+        automated = {
+          prune    = true
+          selfHeal = true
         }
       }
     }
-  }
+  })
 
   depends_on = [helm_release.argocd]
 }

@@ -8,6 +8,11 @@ output "private_ip" {
   value       = var.instance_enabled ? aws_instance.windows[0].private_ip : null
 }
 
+output "public_ip" {
+  description = "Public IP of the Windows server (assigned at launch)"
+  value       = var.instance_enabled ? aws_instance.windows[0].public_ip : null
+}
+
 output "vpc_id" {
   description = "VPC ID the instance is deployed into"
   value       = data.aws_vpc.horizon.id

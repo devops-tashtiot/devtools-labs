@@ -12,7 +12,7 @@ inputs = {
   root_volume_size = 30
   instance_enabled = true
 
-  vpc_id                    = ""
+  vpc_id                    = "vpc-0c5eaad2eb2976b41"
   private_subnet_tag_filter = "spokeSubnet1"
 
   key_pair_name = ""

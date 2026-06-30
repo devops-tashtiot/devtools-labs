@@ -1,6 +1,6 @@
 output "argocd_url" {
-  description = "Open this in your browser to access ArgoCD"
-  value       = "http://${data.kubernetes_service.argocd_server.status[0].load_balancer[0].ingress[0].hostname}"
+  description = "ArgoCD will be accessible at this URL once argocd-ingress is applied"
+  value       = "https://argocd.devopstashtiot.page"
 }
 
 output "argocd_initial_password_command" {

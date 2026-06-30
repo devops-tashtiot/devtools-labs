@@ -12,11 +12,27 @@ module "eks" {
   subnet_ids = data.aws_subnets.target.ids
 
   eks_managed_node_groups = {
-    default = {
-      instance_types         = [var.node_instance_type]
-      min_size               = var.node_min_size
-      max_size               = var.node_max_size
-      desired_size           = var.node_desired_size
+    larger = {
+      instance_types = [var.larger_node_instance_type]
+      min_size       = var.node_min_size
+      max_size       = var.node_max_size
+      desired_size   = var.node_desired_size
+    }
+  }
+
+  cluster_addons = {
+    vpc-cni = {
+      most_recent    = true
+      before_compute = true
+    }
+    coredns = {
+      most_recent = true
+    }
+    kube-proxy = {
+      most_recent = true
+    }
+    aws-ebs-csi-driver = {
+      most_recent = true
     }
   }
 

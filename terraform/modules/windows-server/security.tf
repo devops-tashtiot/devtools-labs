@@ -30,6 +30,15 @@ resource "aws_vpc_security_group_ingress_rule" "rdp" {
   cidr_ipv4         = local.vpc_cidr
 }
 
+resource "aws_vpc_security_group_ingress_rule" "rdp_my_ip" {
+  security_group_id = aws_security_group.windows.id
+  description       = "RDP from anywhere"
+  from_port         = 3389
+  to_port           = 3389
+  ip_protocol       = "tcp"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
 
 resource "aws_vpc_security_group_ingress_rule" "winrm_http" {
   security_group_id = aws_security_group.windows.id

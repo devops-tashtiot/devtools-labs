@@ -21,4 +21,7 @@ inputs = {
 
   vpc_id            = ""
   subnet_tag_filter = "spokeSubnet"
+
+  # NOTE: t3.xlarge is NOT free-tier. Destroy the cluster when not in use.
+  larger_node_instance_type = "t3.xlarge"
 }
