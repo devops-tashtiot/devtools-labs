@@ -1,20 +1,12 @@
-data "aws_ami" "amazon_linux_2023" {
+# Built by packer/minikube-ami/ — Docker, kubectl, Helm and the minikube binary are
+# already installed, so user_data only has to start minikube and bootstrap ArgoCD.
+data "aws_ami" "minikube_base" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = ["self"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-2023*-x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
+    values = [var.ami_name_filter]
   }
 }
 

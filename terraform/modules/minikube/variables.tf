@@ -46,32 +46,26 @@ variable "key_pair_name" {
   default     = ""
 }
 
+variable "ami_name_filter" {
+  description = "Name filter for the custom AMI built by packer/minikube-ami/ (Docker/kubectl/Helm/minikube pre-installed)."
+  type        = string
+  default     = "minikube-devtools-base-*"
+}
+
 variable "argocd_chart_version" {
   description = "ArgoCD Helm chart version to install inside Minikube."
   type        = string
   default     = "9.4.2"
 }
 
-variable "nginx_ingress_chart_version" {
-  description = "ingress-nginx Helm chart version."
+variable "argocd_provisions_repo" {
+  description = "GitOps repo holding Helm chart sources (devtools-provisions)."
   type        = string
-  default     = "4.11.3"
+  default     = "https://github.com/devops-tashtiot/devtools-provisions"
 }
 
-variable "argocd_hostname" {
-  description = "Public hostname for ArgoCD (must match the Cloudflare DNS CNAME)."
+variable "argocd_definition_repo" {
+  description = "GitOps repo holding env-specific values overrides (devtools-definition)."
   type        = string
-  default     = "argocd.devopstashtiot.page"
-}
-
-variable "tunnel_credentials_s3_bucket" {
-  description = "S3 bucket containing the Cloudflare tunnel credentials JSON."
-  type        = string
-  default     = "terraform-state-342831714456"
-}
-
-variable "tunnel_credentials_s3_key" {
-  description = "S3 key for the Cloudflare tunnel credentials JSON."
-  type        = string
-  default     = "cloudflare/devtools-labs-tunnel.json"
+  default     = "https://github.com/devops-tashtiot/devtools-definition"
 }
