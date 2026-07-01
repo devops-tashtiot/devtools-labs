@@ -27,3 +27,8 @@ output "iam_instance_profile_name" {
   value       = aws_iam_instance_profile.minikube.name
   description = "Instance profile name — reused by packer/minikube-ami/ so the AMI build instance can reach SSM without provisioning its own IAM resources."
 }
+
+output "data_volume_id" {
+  value       = aws_ebs_volume.minikube_data.id
+  description = "Persistent EBS volume backing /var/lib/docker — survives instance replacement (prevent_destroy)."
+}

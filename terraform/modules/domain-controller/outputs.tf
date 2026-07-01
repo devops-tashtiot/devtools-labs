@@ -43,6 +43,26 @@ output "fleet_manager_url" {
   value       = var.instance_enabled ? "https://${var.aws_region}.console.aws.amazon.com/systems-manager/fleet-manager/managed-nodes/${aws_instance.windows[0].id}/remote-desktop" : "Instance not deployed (instance_enabled = false)"
 }
 
+output "domain_name" {
+  description = "FQDN of the AD forest promoted on this instance."
+  value       = var.promote_domain_controller ? var.domain_name : null
+}
+
+output "base_dn" {
+  description = "Base distinguished name of the domain (for LDAP directory config)."
+  value       = var.promote_domain_controller ? local.base_dn : null
+}
+
+output "bitbucket_ou_dn" {
+  description = "OU holding the LDAP bind account and sample user (for LDAP directory config)."
+  value       = var.promote_domain_controller ? "OU=Bitbucket,${local.base_dn}" : null
+}
+
+output "ldap_bind_username" {
+  description = "sAMAccountName Bitbucket should bind to LDAP with."
+  value       = var.promote_domain_controller ? var.ldap_bind_username : null
+}
+
 output "admin_password_command" {
   description = "Decrypt the initial Administrator password (requires key pair)"
   value       = var.instance_enabled && var.key_pair_name != "" ? "aws ec2 get-password-data --instance-id ${aws_instance.windows[0].id} --priv-launch-key <path-to-${var.key_pair_name}.pem> --region ${var.aws_region} --profile ${var.aws_profile}" : "No key pair configured — use SSM Fleet Manager to set a password."

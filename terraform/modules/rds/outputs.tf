@@ -24,7 +24,7 @@ output "db_username" {
 }
 
 output "admin_password" {
-  description = "Master DB password — consumed by the rds-databases module to provision per-tool databases"
+  description = "Master DB password — mirrored into SSM Parameter Store (/devtools/rds/admin-password) so devtool init containers can provision their own per-tool databases/roles"
   value       = var.db_password
   sensitive   = true
 }

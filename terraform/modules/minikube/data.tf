@@ -35,3 +35,10 @@ data "aws_subnets" "target" {
     values = ["*${var.subnet_tag_filter}*"]
   }
 }
+
+# Looked up independently (rather than via aws_instance.minikube.availability_zone)
+# so the persistent data volume doesn't create a dependency cycle with the
+# instance, whose user_data needs the volume's ID to mount it.
+data "aws_subnet" "selected" {
+  id = tolist(data.aws_subnets.target.ids)[0]
+}

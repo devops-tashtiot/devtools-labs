@@ -4,6 +4,11 @@ locals {
   # duplicating its contents here.
   application_yaml_raw_url = "${replace(var.argocd_definition_repo, "https://github.com", "https://raw.githubusercontent.com")}/main/application.yaml"
 
+  # Nitro instances expose EBS volumes as NVMe devices with unpredictable
+  # /dev/nvmeXn1 numbering, but AWS always creates a stable by-id symlink keyed
+  # on the volume ID — use that instead of the requested device_name.
+  data_volume_symlink = "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${replace(aws_ebs_volume.minikube_data.id, "-", "")}"
+
   user_data = <<-SCRIPT
     #!/bin/bash
     exec > /var/log/minikube-init.log 2>&1
@@ -15,15 +20,44 @@ locals {
     # into the AMI by packer/minikube-ami/ so rebuilding this instance doesn't
     # depend on dnf/GitHub/dl.k8s.io/GCS being reachable and fast at boot time.
 
-    echo "=== [1/3] Starting Minikube (docker driver, 4 CPUs, 12 GB RAM) ==="
+    echo "=== [1/4] Mounting persistent data volume onto /var/lib/docker ==="
+    DATA_DEV="${local.data_volume_symlink}"
+    for i in $(seq 1 60); do
+      [ -e "$DATA_DEV" ] && break
+      sleep 5
+    done
+    [ -e "$DATA_DEV" ] || { echo "data volume never attached" >&2; exit 1; }
+
+    if ! blkid "$DATA_DEV" >/dev/null 2>&1; then
+      echo "Formatting new data volume"
+      mkfs.ext4 -F "$DATA_DEV"
+    fi
+
+    mkdir -p /mnt/minikube-data
+    DATA_UUID=$(blkid -s UUID -o value "$DATA_DEV")
+    grep -q "$DATA_UUID" /etc/fstab || echo "UUID=$DATA_UUID /mnt/minikube-data ext4 defaults,nofail 0 2" >> /etc/fstab
+    mount /mnt/minikube-data
+
+    systemctl stop docker || true
+    mkdir -p /mnt/minikube-data/docker
+    if [ -d /var/lib/docker ] && [ -n "$(ls -A /var/lib/docker 2>/dev/null)" ] && [ ! -d /mnt/minikube-data/docker/overlay2 ]; then
+      rsync -a /var/lib/docker/ /mnt/minikube-data/docker/
+    fi
+    rm -rf /var/lib/docker
+    mkdir -p /var/lib/docker
+    grep -q "/var/lib/docker" /etc/fstab || echo "/mnt/minikube-data/docker /var/lib/docker none bind,nofail 0 0" >> /etc/fstab
+    mount --bind /mnt/minikube-data/docker /var/lib/docker
+    systemctl start docker
+
+    echo "=== [2/4] Starting Minikube (docker driver, ${var.minikube_cpus} CPUs, ${var.minikube_memory_mb} MB RAM) ==="
     minikube start \
       --driver=docker \
       --force \
-      --cpus=4 \
-      --memory=12288 \
+      --cpus=${var.minikube_cpus} \
+      --memory=${var.minikube_memory_mb} \
       --wait=all
 
-    echo "=== [2/3] Installing ArgoCD ==="
+    echo "=== [3/4] Installing ArgoCD ==="
     kubectl create namespace argocd
 
     {
@@ -89,11 +123,35 @@ locals {
 
     rm -f /tmp/argocd-values.yaml
 
-    echo "=== [3/3] Registering devtools ApplicationSet (app-of-apps) ==="
+    echo "=== [4/4] Registering devtools ApplicationSet (app-of-apps) ==="
     curl -fsSL ${local.application_yaml_raw_url} | kubectl apply -f -
 
     echo "=== Bootstrap complete — ArgoCD installed (ClusterIP only). Ingress, cloudflared, and everything else is now managed by the devtools ApplicationSet via GitOps. ==="
   SCRIPT
+}
+
+# Separate resource (own lifecycle from the instance) so Bitbucket/Confluence/
+# Jira's local-hostpath PVC data — which physically lives under /var/lib/docker,
+# bind-mounted here in user_data — survives instance replacement (e.g. AMI
+# upgrades), instead of being destroyed along with the root volume every time.
+resource "aws_ebs_volume" "minikube_data" {
+  availability_zone = data.aws_subnet.selected.availability_zone
+  size              = var.data_volume_size
+  type              = "gp3"
+  encrypted         = true
+
+  tags = { Name = "${var.instance_name}-data" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_volume_attachment" "minikube_data" {
+  device_name  = "/dev/sdf"
+  volume_id    = aws_ebs_volume.minikube_data.id
+  instance_id  = aws_instance.minikube.id
+  force_detach = true
 }
 
 resource "aws_instance" "minikube" {

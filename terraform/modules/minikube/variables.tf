@@ -28,6 +28,24 @@ variable "root_volume_size" {
   default     = 50
 }
 
+variable "data_volume_size" {
+  description = "Size in GB of the separate, persistent EBS volume that backs /var/lib/docker. Kept as its own resource (prevent_destroy) so Bitbucket/Confluence/Jira's local-hostpath PVC data survives instance replacement (e.g. AMI upgrades), unlike the root volume."
+  type        = number
+  default     = 60
+}
+
+variable "minikube_cpus" {
+  description = "CPUs given to the Minikube node (docker driver) — must be sized to what the instance_type actually has, since it doesn't auto-scale with the host."
+  type        = number
+  default     = 4
+}
+
+variable "minikube_memory_mb" {
+  description = "Memory (MB) given to the Minikube node (docker driver) — must be sized to what the instance_type actually has, since it doesn't auto-scale with the host."
+  type        = number
+  default     = 12288
+}
+
 variable "vpc_id" {
   description = "Explicit VPC ID. Leave empty to auto-discover the first VPC in the account."
   type        = string
