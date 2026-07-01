@@ -36,9 +36,11 @@ resource "aws_security_group" "rds" {
 resource "aws_db_instance" "this" {
   identifier = var.identifier
 
-  engine         = "postgres"
-  engine_version = var.postgres_version
-  instance_class = "db.t3.micro"
+  engine                      = "postgres"
+  engine_version              = var.postgres_version
+  instance_class              = var.instance_class
+  allow_major_version_upgrade = true
+  apply_immediately           = true
 
   db_name  = var.db_name
   username = var.db_username
@@ -47,8 +49,8 @@ resource "aws_db_instance" "this" {
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  allocated_storage     = 20
-  max_allocated_storage = 20
+  allocated_storage     = var.allocated_storage
+  max_allocated_storage = var.max_allocated_storage
   storage_type          = "gp2"
 
   backup_retention_period = 0

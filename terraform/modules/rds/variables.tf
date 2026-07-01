@@ -42,6 +42,24 @@ variable "postgres_version" {
   default     = "15"
 }
 
+variable "instance_class" {
+  description = "RDS instance class. Bump this (via terragrunt inputs) if the shared instance gets too small for the growing number of devtool databases."
+  type        = string
+  default     = "db.t3.micro"
+}
+
+variable "allocated_storage" {
+  description = "Initial/minimum storage in GB. Bump this (via terragrunt inputs) if the shared instance runs low on space."
+  type        = number
+  default     = 20
+}
+
+variable "max_allocated_storage" {
+  description = "Ceiling for RDS storage autoscaling in GB."
+  type        = number
+  default     = 20
+}
+
 variable "aws_region" {
   type    = string
   default = ""

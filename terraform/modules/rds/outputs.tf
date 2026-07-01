@@ -22,3 +22,9 @@ output "db_username" {
   description = "Master DB username"
   value       = aws_db_instance.this.username
 }
+
+output "admin_password" {
+  description = "Master DB password — consumed by the rds-databases module to provision per-tool databases"
+  value       = var.db_password
+  sensitive   = true
+}
