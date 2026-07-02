@@ -50,13 +50,36 @@ locals {
     mount --bind /mnt/minikube-data/docker /var/lib/docker
     systemctl start docker
 
-    echo "=== [2/5] Starting Minikube (docker driver, ${var.minikube_cpus} CPUs, ${var.minikube_memory_mb} MB RAM) ==="
-    minikube start \
-      --driver=docker \
-      --force \
-      --cpus=${var.minikube_cpus} \
-      --memory=${var.minikube_memory_mb} \
-      --wait=all
+    echo "=== [2/5] Installing minikube.service so the cluster survives the nightly stop/manual-start cycle ==="
+    # The nightly cost-saving stop (see schedule.tf) only stops the EC2 instance —
+    # there is no matching auto-start, and even once someone starts it back up,
+    # a plain `minikube start` in user_data only ever runs on first boot, not on
+    # every subsequent boot. Without this unit, every restart after a nightly
+    # stop leaves the box up but the cluster itself down until someone manually
+    # SSHes/SSMs in and runs `minikube start` by hand.
+    {
+      echo '[Unit]'
+      echo 'Description=Start Minikube cluster (docker driver)'
+      echo 'After=docker.service network-online.target'
+      echo 'Wants=network-online.target'
+      echo 'Requires=docker.service'
+      echo ''
+      echo '[Service]'
+      echo 'Type=oneshot'
+      echo 'RemainAfterExit=yes'
+      echo 'Environment=HOME=/root'
+      echo 'Environment=MINIKUBE_HOME=/root/.minikube'
+      echo 'ExecStart=/usr/local/bin/minikube start --driver=docker --force --cpus=${var.minikube_cpus} --memory=${var.minikube_memory_mb} --wait=all'
+      echo 'TimeoutStartSec=900'
+      echo 'Restart=on-failure'
+      echo 'RestartSec=30'
+      echo ''
+      echo '[Install]'
+      echo 'WantedBy=multi-user.target'
+    } > /etc/systemd/system/minikube.service
+
+    systemctl daemon-reload
+    systemctl enable --now minikube.service
 
     echo "=== [3/5] Installing ArgoCD ==="
     kubectl create namespace argocd

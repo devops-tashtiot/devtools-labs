@@ -51,9 +51,10 @@ Each `-provision`/`-definition` pair has its own ApplicationSet, following the s
 
 **minikube module:**
 1. A single EC2 instance running Minikube (docker driver), built from a custom AMI (see below) with Docker/kubectl/Helm/minikube already installed — `user_data` only starts minikube and bootstraps ArgoCD
-2. ArgoCD — installed via Helm inside Minikube, `ClusterIP` only
-3. The `clusters-applicationset` Application (app-of-apps) is registered first; `user_data` then blocks until `ingress-nginx`, `cloudflared`, and `external-secrets-operator` all report Synced+Healthy
-4. The `devtools-applicationset` Application (app-of-apps) is registered last — from here on, ArgoCD itself deploys everything else, including the ArgoCD `Ingress`, as regular devtools
+2. `user_data` also installs and enables a `minikube.service` systemd unit (`ExecStart=minikube start --driver=docker --force --cpus=<minikube_cpus> --memory=<minikube_memory_mb> --wait=all`, `After=docker.service`, `WantedBy=multi-user.target`) — this is what makes the cluster survive the nightly auto-stop (see "Cost note" below): without it, a plain one-shot `minikube start` in `user_data` only ever runs on the instance's very first boot, so every later boot after a stop would leave the EC2 instance up but the cluster itself down until someone manually SSMed in and ran `minikube start` by hand. The unit is only written/enabled *after* the data-volume mount + `/var/lib/docker` bind-mount dance (step 1) completes, specifically to avoid racing `minikube start` against the not-yet-remounted docker storage on a truly fresh instance launch.
+3. ArgoCD — installed via Helm inside Minikube, `ClusterIP` only
+4. The `clusters-applicationset` Application (app-of-apps) is registered first; `user_data` then blocks until `ingress-nginx`, `cloudflared`, and `external-secrets-operator` all report Synced+Healthy
+5. The `devtools-applicationset` Application (app-of-apps) is registered last — from here on, ArgoCD itself deploys everything else, including the ArgoCD `Ingress`, as regular devtools
 
 **rds module:**
 1. A Postgres RDS instance (`db.t3.micro`/20GB by default, free-tier) in a DB subnet group built from the account's spoke subnets
@@ -136,6 +137,8 @@ terragrunt apply   # ~15-20 min; installs Minikube + ArgoCD, then ArgoCD deploys
 ```
 
 **ArgoCD:** `https://argocd.devopstashtiot.page` — user `admin`, password `123456`.
+
+**Restarting after the nightly auto-stop (or any EC2 stop/start):** nothing manual is needed — `minikube.service` (installed by `user_data`, see "What the Modules Provision" → minikube module) auto-starts the cluster on every boot. Just start the EC2 instance (console/CLI/SSM: `aws ec2 start-instances --instance-ids <id>`) and wait a few minutes; no need to SSM in and run `minikube start` by hand. This only applies to an existing instance being stopped/started — a full `terragrunt apply` that replaces the instance (e.g. after a `user_data` change, since `user_data` isn't in `lifecycle.ignore_changes`) still goes through the full ~15-20 min first-boot flow above.
 
 ### Applying all three units together
 
