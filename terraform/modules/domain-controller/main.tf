@@ -15,18 +15,18 @@ locals {
   ad_bootstrap_user_data = var.promote_domain_controller ? local.ad_bootstrap_script : ""
 
   ad_bootstrap_script = templatefile("${path.module}/templates/ad-bootstrap.ps1.tftpl", {
-    base_dn                      = local.base_dn
-    domain_name                  = var.domain_name
-    domain_netbios_name          = var.domain_netbios_name
-    admin_username_ssm_parameter = var.admin_username_ssm_parameter
-    admin_password_ssm_parameter = var.admin_password_ssm_parameter
-    ou_name                      = var.ou_name
-    ldap_bind_username           = var.ldap_bind_username
-    ldap_bind_password           = var.ldap_bind_password
-    sample_user_username         = var.sample_user_username
-    sample_user_password         = var.sample_user_password
-    ad_group_name                = var.ad_group_name
-    ad_group_member_username     = var.ad_group_member_username
+    base_dn                          = local.base_dn
+    domain_name                      = var.domain_name
+    domain_netbios_name              = var.domain_netbios_name
+    admin_username_ssm_parameter     = var.admin_username_ssm_parameter
+    admin_password_ssm_parameter     = var.admin_password_ssm_parameter
+    ou_name                          = var.ou_name
+    ldap_bind_username_ssm_parameter = var.ldap_bind_username_ssm_parameter
+    ldap_bind_password_ssm_parameter = var.ldap_bind_password_ssm_parameter
+    sample_user_username             = var.sample_user_username
+    sample_user_password             = var.sample_user_password
+    ad_group_name                    = var.ad_group_name
+    ad_group_member_username         = var.ad_group_member_username
   })
 }
 
@@ -70,4 +70,21 @@ resource "aws_instance" "windows" {
   lifecycle {
     ignore_changes = [ami]
   }
+}
+
+# -----------------------------------------------------------------------------
+# LDAP connection URL, published to SSM instead of a private Route53 zone —
+# Horizon LZ's org-wide SCP has an explicit deny on route53:CreateHostedZone,
+# so a private hosted zone isn't an option in this account. Terraform rewrites
+# this parameter with the instance's current private_ip on every apply, so
+# consumers (clusters-provision/clusters/rhbk's ExternalSecret, see
+# clusters-definition/clusters/rhbk/values.yaml's ldap.connectionUrlSsmParameter)
+# read the current value from SSM instead of a value baked into git.
+# -----------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "ldap_connection_url" {
+  count = var.instance_enabled ? 1 : 0
+  name  = "/devtools/domain-controller/ldap-connection-url"
+  type  = "SecureString"
+  value = "ldap://${aws_instance.windows[0].private_ip}:389"
 }

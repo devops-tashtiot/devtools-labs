@@ -58,9 +58,14 @@ output "bitbucket_ou_dn" {
   value       = var.promote_domain_controller ? "OU=Bitbucket,${local.base_dn}" : null
 }
 
-output "ldap_bind_username" {
-  description = "sAMAccountName Bitbucket should bind to LDAP with."
-  value       = var.promote_domain_controller ? var.ldap_bind_username : null
+output "ldap_bind_username_ssm_parameter" {
+  description = "SSM parameter path holding the sAMAccountName Bitbucket/RHBK should bind to LDAP with — the value itself is never in Terraform state or user-data."
+  value       = var.promote_domain_controller ? var.ldap_bind_username_ssm_parameter : null
+}
+
+output "ldap_connection_url_ssm_parameter" {
+  description = "SSM parameter path holding the current ldap://<private_ip>:389 connection URL — rewritten on every apply, so consumers reading from SSM never need a manual update when the instance is replaced."
+  value       = var.instance_enabled ? "/devtools/domain-controller/ldap-connection-url" : null
 }
 
 output "admin_password_command" {

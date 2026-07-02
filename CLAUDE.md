@@ -1,15 +1,6 @@
 # CLAUDE.md — devtools-labs
 
-This repo provisions the cluster and bootstraps ArgoCD for the devtools platform. It uses Terragrunt to drive Terraform modules. Two alternative environments are supported — **EKS** (heavier, always-on cost) and **minikube** (a single EC2 instance, cheaper) — only one should be active at a time (see "Key Design Decisions").
-
-## Cost Warning
-
-**EKS is not free-tier eligible.** The control plane costs ~$0.10/hr and the `t3.medium` nodes are not free-tier. Destroy the cluster when not in use:
-
-```bash
-cd terraform/live/devtools/eks
-terragrunt destroy
-```
+This repo provisions the infra behind the devtools platform: a Minikube cluster (with ArgoCD bootstrapped inside it), an RDS Postgres instance, and a standalone Windows AD domain controller. It uses Terragrunt to drive Terraform modules.
 
 ## Repository Structure
 
@@ -17,22 +8,28 @@ terragrunt destroy
 terraform/
 ├── root.hcl                    # Shared: AWS provider, S3 remote state config
 ├── live/devtools/
-│   ├── eks/                    # terragrunt.hcl — cluster inputs
-│   ├── argocd/                 # terragrunt.hcl — depends on eks
-│   ├── argocd-ingress/         # terragrunt.hcl — depends on eks + argocd
-│   └── minikube/               # terragrunt.hcl — standalone EC2 instance
+│   ├── minikube/                # terragrunt.hcl — standalone EC2 instance
+│   ├── rds/                     # terragrunt.hcl — standalone RDS instance
+│   └── domain-controller/       # terragrunt.hcl — standalone Windows AD EC2 instance
 └── modules/
-    ├── eks/                    # VPC lookup + EKS managed node group
-    ├── argocd/                 # Helm: argo-cd chart + ApplicationSet
-    ├── argocd-ingress/         # Helm: nginx-ingress; K8s: cloudflared + ArgoCD Ingress
-    └── minikube/               # EC2 user_data: start minikube + ArgoCD + app-of-apps only
+    ├── minikube/                # EC2 user_data: start minikube + ArgoCD + app-of-apps only
+    ├── rds/                     # Postgres RDS instance + security group
+    └── domain-controller/       # Windows Server 2022 EC2 + AD forest bootstrap
 ```
 
 The Packer template for the minikube module's golden AMI (Docker/kubectl/Helm/minikube
 pre-installed) lives in its own repo:
 [`devops-tashtiot/minikube-ami`](https://github.com/devops-tashtiot/minikube-ami).
 
-**minikube module scope is intentionally minimal** — it bootstraps ArgoCD plus two app-of-apps Applications, `clusters-applicationset` then `devtools-applicationset` in that order (see "What the Modules Provision" below), and nothing else. `nginx-ingress`, `cloudflared`, `external-secrets-operator`, and the ArgoCD `Ingress` are **not** provisioned by Terraform for this environment; they're GitOps-managed via `clusters-provision`/`clusters-definition` (plus an `ingress` block in the `argocd` devtool) that ArgoCD deploys itself once it's up. This mirrors the EKS split (`eks` → `argocd` → `argocd-ingress`) except the ingress layer moved from Terraform into GitOps.
+**minikube module scope is intentionally minimal** — it bootstraps ArgoCD plus two app-of-apps Applications, `clusters-applicationset` then `devtools-applicationset` in that order (see "What the Modules Provision" below), and nothing else. `nginx-ingress`, `cloudflared`, `external-secrets-operator`, and the ArgoCD `Ingress` are **not** provisioned by Terraform; they're GitOps-managed via `clusters-provision`/`clusters-definition` (plus an `ingress` block in the `argocd` devtool) that ArgoCD deploys itself once it's up.
+
+## Three independent units — not a dependency chain
+
+`minikube`, `rds`, and `domain-controller` are three separate Terragrunt units under `terraform/live/devtools`, and **none of them has a `dependency` block on either of the others**. Each resolves its own VPC/subnets independently (by data lookup or hardcoded tag filter, not by reading another unit's outputs), so:
+
+- Any one of them can be applied, destroyed, or torn down and rebuilt without touching the other two.
+- `terragrunt run-all apply`/`destroy` from `terraform/live/devtools` runs all three **in parallel** — there's no ordering to wait on.
+- They happen to share the same VPC (`vpc-0c5eaad2eb2976b41`) and similar spoke-subnet tag filters by convention, not by Terraform reference.
 
 ## Five-Repo GitOps Architecture
 
@@ -40,7 +37,7 @@ This repo is one of five that form the platform:
 
 | Repo | Role |
 |---|---|
-| **devtools-labs** (this repo) | Infrastructure: EKS/minikube cluster + ArgoCD bootstrap |
+| **devtools-labs** (this repo) | Infrastructure: Minikube cluster + ArgoCD bootstrap, RDS, domain controller |
 | **devtools-provision** | What to deploy: Helm charts for each devtool (bitbucket, confluence, jira, argocd, woodpecker) under `devtools/` |
 | **devtools-definition** | How to configure: env-specific `values.yaml` overrides per devtool |
 | **clusters-provision** | What to deploy: Helm charts for shared cluster infra (ingress-nginx, cloudflared, external-secrets-operator) under `clusters/` |
@@ -50,23 +47,7 @@ Each `-provision`/`-definition` pair has its own ApplicationSet, following the s
 
 **Why split cluster infra from devtools:** devtools can depend on cluster-level infra being ready first — e.g. bitbucket's `ExternalSecret` needs `external-secrets-operator` running before it can sync. Two separate ApplicationSets let the minikube module's bootstrap enforce that ordering explicitly by waiting on `clusters-applicationset`'s apps before registering `devtools-applicationset`; a single shared ApplicationSet couldn't express that dependency.
 
-**EKS is not wired to `clusters-applicationset`** — `modules/argocd` (the EKS path) still only registers `devtools-applicationset`. If EKS is ever brought back up, cluster-level infra keeps coming from Terraform (`argocd-ingress` module) as before; only the `minikube` module's `user_data` sequences both ApplicationSets.
-
 ## What the Modules Provision
-
-**eks module:**
-1. Uses existing spoke VPC (`vpc-0c5eaad2eb2976b41`) — private subnets only (`map_public_ip_on_launch = false`), no NAT Gateway
-2. All outbound traffic routes through a Gateway Load Balancer endpoint (`vpce-063335608106cb20a`) to a centralized hub firewall/inspection layer
-3. EKS cluster — v1.31, public endpoint, single `t3.medium` managed node group
-
-**argocd module:**
-3. ArgoCD — installed via Helm (chart v9.4.2), `ClusterIP` only (no load balancer)
-4. ApplicationSet — wires the two GitOps repos for auto-discovery of tools
-
-**argocd-ingress module:**
-5. `nginx-ingress` controller — `ClusterIP`, routes by `Host` header
-6. `cloudflared` Deployment — dials out to Cloudflare edge, forwards traffic to nginx-ingress
-7. `Ingress` resource — routes `argocd.devopstashtiot.page` → `argocd-server`
 
 **minikube module:**
 1. A single EC2 instance running Minikube (docker driver), built from a custom AMI (see below) with Docker/kubectl/Helm/minikube already installed — `user_data` only starts minikube and bootstraps ArgoCD
@@ -74,31 +55,42 @@ Each `-provision`/`-definition` pair has its own ApplicationSet, following the s
 3. The `clusters-applicationset` Application (app-of-apps) is registered first; `user_data` then blocks until `ingress-nginx`, `cloudflared`, and `external-secrets-operator` all report Synced+Healthy
 4. The `devtools-applicationset` Application (app-of-apps) is registered last — from here on, ArgoCD itself deploys everything else, including the ArgoCD `Ingress`, as regular devtools
 
+**rds module:**
+1. A Postgres RDS instance (`db.t3.micro`/20GB by default, free-tier) in a DB subnet group built from the account's spoke subnets
+2. A security group allowing Postgres (5432) from CIDR blocks matching the minikube/domain-controller spoke subnets — CIDR-based, not a reference to either unit's security group, so `rds` never has to wait on them
+3. Used by devtools (e.g. Bitbucket) that need an external database instead of an in-cluster one
+
+**domain-controller module:**
+1. A Windows Server 2022 EC2 instance (`instance_enabled` toggles whether it's created at all)
+2. Optionally promotes itself to an Active Directory forest (`promote_domain_controller = true`) — bootstraps a domain, an OU, an LDAP bind account, a sample user, and a group, for testing Bitbucket's LDAP integration
+3. Access is via SSM Session Manager / Fleet Manager (browser RDP) — no open admin ports, no NAT/public IP needed
+
 ## Prerequisites
 
-**EKS (`argocd-ingress` module):**
-1. **Cloudflare tunnel credentials in S3** — upload once before first apply:
-   ```bash
-   aws s3 cp ~/.cloudflared/<tunnel-id>.json \
-     s3://terraform-state-342831714456/cloudflare/devtools-labs-tunnel.json \
-     --profile 342831714456_Workload-Admin-PS
-   ```
-2. **Cloudflare DNS CNAME** — each subdomain must point to `7de872ce-2826-42fb-9aea-325e10e3e5fc.cfargotunnel.com` (see parent `CLAUDE.md` for the API call).
+**Cloudflare tunnel credentials in SSM Parameter Store** — a `SecureString` at `/devtools/cloudflare/tunnel-credentials` (already populated). The `external-secrets-operator` devtool must be deployed first for the `cloudflared` devtool's ExternalSecret to sync — it is, automatically, via the `clusters-applicationset`. To rotate the tunnel credentials later:
+```bash
+aws ssm put-parameter \
+  --name /devtools/cloudflare/tunnel-credentials \
+  --type SecureString \
+  --value "$(cat ~/.cloudflared/<tunnel-id>.json)" \
+  --overwrite \
+  --profile 342831714456_Workload-Admin-PS \
+  --region il-central-1
+```
+The path must match `tunnelCredentialsSsmParameter` in `devtools-definition/devtools/cloudflared/values.yaml`, and fall under the `arn:aws:ssm:*:*:parameter/devtools/*` prefix the minikube instance role is allowed to read.
 
-**minikube (`cloudflared` devtool):**
-1. **Cloudflare tunnel credentials in SSM Parameter Store** — a `SecureString` at `/devtools/cloudflare/tunnel-credentials` (already populated, migrated from the S3 object above). The `external-secrets-operator` devtool must be deployed first for the `cloudflared` devtool's ExternalSecret to sync — it is, automatically, via the same ApplicationSet. To rotate the tunnel credentials later:
-   ```bash
-   aws ssm put-parameter \
-     --name /devtools/cloudflare/tunnel-credentials \
-     --type SecureString \
-     --value "$(cat ~/.cloudflared/<tunnel-id>.json)" \
-     --overwrite \
-     --profile 342831714456_Workload-Admin-PS \
-     --region il-central-1
-   ```
-   The path must match `tunnelCredentialsSsmParameter` in `devtools-definition/devtools/cloudflared/values.yaml`, and fall under the `arn:aws:ssm:*:*:parameter/devtools/*` prefix the minikube instance role is allowed to read.
-2. **Cloudflare DNS CNAME** — same as EKS, above.
-3. **The minikube base AMI must exist** — the `minikube` module looks up the most recent AMI matching `minikube-devtools-base-*` (owned by this account) via `data.aws_ami.minikube_base`. If none exists yet (fresh account), build one first — see below.
+**Cloudflare DNS CNAME** — each subdomain must point to `7de872ce-2826-42fb-9aea-325e10e3e5fc.cfargotunnel.com` (see parent `CLAUDE.md` for the API call).
+
+**The minikube base AMI must exist** — the `minikube` module looks up the most recent AMI matching `minikube-devtools-base-*` (owned by this account) via `data.aws_ami.minikube_base`. If none exists yet (fresh account), build one first — see below.
+
+**domain-controller's admin/LDAP-bind credentials in SSM Parameter Store** — four `SecureString`s the `ad-bootstrap.ps1.tftpl` user-data script fetches at boot instead of baking into user-data or Terraform state: `/devtools/domain-controller/admin-username`, `/devtools/domain-controller/admin-password` (DSRM/local Administrator), and `/devtools/domain-controller/ldap-bind-username`, `/devtools/domain-controller/ldap-bind-password` (the `svc-devops-tashtiot` service account Bitbucket/RHBK bind to LDAP with — `clusters-definition/clusters/rhbk/values.yaml` points at these same two paths, so RHBK and the domain controller never share a literal credential value in git). Populate all four before applying, e.g.:
+```bash
+aws ssm put-parameter --name /devtools/domain-controller/admin-username --type SecureString --value "Administrator" --profile 342831714456_Workload-Admin-PS --region il-central-1
+aws ssm put-parameter --name /devtools/domain-controller/admin-password --type SecureString --value "<password>" --profile 342831714456_Workload-Admin-PS --region il-central-1
+aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-username --type SecureString --value "svc-devops-tashtiot" --profile 342831714456_Workload-Admin-PS --region il-central-1
+aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-password --type SecureString --value "<password>" --profile 342831714456_Workload-Admin-PS --region il-central-1
+```
+Until these exist, `terragrunt apply` still succeeds (the instance boots) but `ad-bootstrap.ps1.tftpl` fails to fetch them and forest promotion/LDAP object creation never completes.
 
 ## Building the Minikube base AMI
 
@@ -137,42 +129,25 @@ The next `terragrunt apply`/`plan` in `terraform/live/devtools/minikube` will pi
 
 ## Apply Workflow
 
-Dependency chain is `eks → argocd → argocd-ingress`. Run all at once:
-
-```bash
-cd terraform/live/devtools
-terragrunt run-all apply
-```
-
-**Caution:** since `eks`, `argocd`, `argocd-ingress`, `minikube`, `rds`, and `domain-controller` are all sibling units under `terraform/live/devtools`, a plain `terragrunt run-all apply` from that directory targets **all six** — including both alternative environments (EKS and minikube) at once, which "Key Design Decisions" below explicitly warns against. Use the scoped wrapper (below) or step-by-step commands instead unless you actually want everything.
-
-Or step by step:
-```bash
-cd terraform/live/devtools/eks           && terragrunt apply  # ~15-20 min
-cd terraform/live/devtools/argocd        && terragrunt apply  # ~5-10 min
-cd terraform/live/devtools/argocd-ingress && terragrunt apply # ~3-5 min
-```
-
-**ArgoCD:** `https://argocd.devopstashtiot.page` — user `admin`, password `123456`.
-
-Or, for the minikube environment:
 ```bash
 cd terraform/live/devtools/minikube
 terragrunt apply   # ~15-20 min; installs Minikube + ArgoCD, then ArgoCD deploys cluster infra, waits for it to be healthy, then deploys devtools
 ```
 
-### Minikube stack wrapper (minikube + rds + domain-controller)
+**ArgoCD:** `https://argocd.devopstashtiot.page` — user `admin`, password `123456`.
 
-`terraform/live/devtools/apply-minikube-stack.sh` runs `terragrunt run-all` scoped to just `minikube`, `rds`, and `domain-controller` (via `--queue-strict-include`), so it never touches `eks`/`argocd`/`argocd-ingress`. Terragrunt's own dependency graph handles ordering: `rds` and `domain-controller` both read `minikube`'s outputs (vpc/subnets/security group), so they wait for minikube, but run in parallel with each other since neither depends on the other.
+### Applying all three units together
+
+`terraform/live/devtools` has only these three units, so a plain `terragrunt run-all` from that directory applies/destroys all of them — no scoping needed. Since none of the three depends on another, they run in parallel.
 
 ```bash
 cd terraform/live/devtools
-./apply-minikube-stack.sh plan       # dry run
-./apply-minikube-stack.sh            # apply (interactive approval)
-./apply-minikube-stack.sh destroy
+terragrunt run-all plan       # dry run
+terragrunt run-all apply      # apply (interactive approval)
+terragrunt run-all destroy
 ```
 
-**Cost note:** `rds` defaults to `db.t3.micro`/20GB (free-tier). `domain-controller` defaults to `t3.small` (~$15/mo, **not** free-tier) and `instance_enabled = true` in its `terragrunt.hcl` — running this wrapper creates it. Set `instance_enabled = false` there first if you only want the RDS piece.
+**Cost note:** `rds` defaults to `db.t3.micro`/20GB (free-tier). `domain-controller` defaults to `t3.small` (~$15/mo, **not** free-tier) and `instance_enabled = true` in its `terragrunt.hcl` — running `run-all apply` creates it. Set `instance_enabled = false` there first if you only want the RDS piece.
 
 ## Adding a New Service
 
@@ -198,9 +173,6 @@ cd terraform/live/devtools
 ## Useful Commands
 
 ```bash
-# Configure kubectl
-cd terraform/live/devtools/eks && terragrunt output -raw kubeconfig_command | bash
-
 # Check pods
 kubectl get pods -n argocd
 kubectl get pods -n kube-system | grep -E "nginx|cloudflared"
@@ -217,10 +189,8 @@ kubectl get pods -n kube-system | grep -E "nginx|cloudflared"
 
 ## Key Design Decisions
 
-- **Private subnets, no NAT Gateway** — nodes run in private subnets (`map_public_ip_on_launch = false`); all egress goes through a Gateway Load Balancer endpoint to a hub VPC firewall. Worker nodes must reach AWS APIs (EKS, ECR, STS, S3) either via the hub or via VPC endpoints — if the hub blocks this, nodes will fail to bootstrap
 - **No AWS load balancer** — `cloudflared` dials out to Cloudflare; `nginx-ingress` is ClusterIP. Zero LB cost.
 - **ArgoCD runs insecure** (`--insecure` flag) — TLS is terminated at Cloudflare; acceptable for a dev platform
 - **Two-source ApplicationSet** — the provision repo owns chart structure; the definition repo owns env-specific values, keeping configuration separate from packaging
-- **Split Terragrunt units** — `eks` and `argocd` are separate units; the `argocd` unit's `dependency` block reads cluster outputs at plan time, so providers are always configured from real values with no `-target` workaround needed
-- **EKS and minikube are alternatives, not simultaneous** — both bootstrap ArgoCD via Helm and a `devtools-applicationset` Application against the same `devtools-provision`/`devtools-definition` repos (minikube additionally bootstraps `clusters-applicationset` against `clusters-provision`/`clusters-definition` first — EKS does not). They also share one Cloudflare tunnel, so running both clusters at once would race two `cloudflared` Deployments and (if `devtools-definition/devtools/argocd/values.yaml`'s `ingress.enabled` is `true`) two controllers fighting over the same `argocd` Ingress object. Destroy one before standing up the other
+- **Three independent Terragrunt units, no dependency graph** — `minikube`, `rds`, and `domain-controller` each resolve their own VPC/subnets rather than reading another unit's outputs, so any one can be applied/destroyed independently of the others (see "Three independent units" above)
 - **minikube instance boots from a custom AMI, not stock Amazon Linux** — the instance is torn down and recreated often; baking Docker/kubectl/Helm/minikube into a golden AMI (built via Packer, see "Building the Minikube base AMI") removes several flaky external downloads from the boot-time critical path, leaving `user_data` with only the fast, instance-specific steps

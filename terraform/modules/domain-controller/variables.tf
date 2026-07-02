@@ -88,17 +88,16 @@ variable "ou_name" {
   default     = "devops-tashtiot"
 }
 
-variable "ldap_bind_username" {
-  description = "sAMAccountName for the read-only service account Bitbucket uses to bind to LDAP."
+variable "ldap_bind_username_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) holding the sAMAccountName for the read-only service account Bitbucket/RHBK use to bind to LDAP. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data."
   type        = string
-  default     = "svc-devops-tashtiot"
+  default     = "/devtools/domain-controller/ldap-bind-username"
 }
 
-variable "ldap_bind_password" {
-  description = "Password for the LDAP bind service account. Matches the lab-wide '123456' convention."
+variable "ldap_bind_password_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) holding the password for the LDAP bind service account. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data. clusters-definition/clusters/rhbk/values.yaml points at this same path so RHBK's LDAP bind credential stays in sync without ever sharing a literal value in git."
   type        = string
-  default     = "123456"
-  sensitive   = true
+  default     = "/devtools/domain-controller/ldap-bind-password"
 }
 
 variable "sample_user_username" {

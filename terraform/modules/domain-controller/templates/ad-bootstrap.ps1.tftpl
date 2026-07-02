@@ -176,12 +176,15 @@ if (-not (Test-AdDomainServicesInstalled)) {
 } elseif (-not (Test-DomainControllerReady)) {
     Write-Output "=== AD DS role installed, forest promotion still finishing — will retry next boot ==="
 } else {
+    $ldapBindUsername = Get-SsmParameterValue -Name "${ldap_bind_username_ssm_parameter}"
+    $ldapBindPassword = Get-SsmParameterValue -Name "${ldap_bind_password_ssm_parameter}"
+
     Initialize-BitbucketLdapObjects `
         -DomainName "${domain_name}" `
         -BaseDn "${base_dn}" `
         -OuName "${ou_name}" `
-        -LdapBindUsername "${ldap_bind_username}" `
-        -LdapBindPassword "${ldap_bind_password}" `
+        -LdapBindUsername $ldapBindUsername `
+        -LdapBindPassword $ldapBindPassword `
         -SampleUserUsername "${sample_user_username}" `
         -SampleUserPassword "${sample_user_password}" `
         -AdGroupName "${ad_group_name}" `
