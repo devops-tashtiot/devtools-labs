@@ -32,19 +32,25 @@ The Packer template for the minikube module's golden AMI (Docker/kubectl/Helm/mi
 pre-installed) lives in its own repo:
 [`devops-tashtiot/minikube-ami`](https://github.com/devops-tashtiot/minikube-ami).
 
-**minikube module scope is intentionally minimal** — it bootstraps ArgoCD and the devtools-applicationset Application and nothing else. `nginx-ingress`, `cloudflared`, and the ArgoCD `Ingress` are **not** provisioned by Terraform for this environment; they're GitOps-managed devtools (`devtools-provisions/devtools/{ingress-nginx,cloudflared}`, plus an `ingress` block in the `argocd` devtool) that ArgoCD deploys itself once it's up. This mirrors the EKS split (`eks` → `argocd` → `argocd-ingress`) except the ingress layer moved from Terraform into GitOps.
+**minikube module scope is intentionally minimal** — it bootstraps ArgoCD plus two app-of-apps Applications, `clusters-applicationset` then `devtools-applicationset` in that order (see "What the Modules Provision" below), and nothing else. `nginx-ingress`, `cloudflared`, `external-secrets-operator`, and the ArgoCD `Ingress` are **not** provisioned by Terraform for this environment; they're GitOps-managed via `clusters-provision`/`clusters-definition` (plus an `ingress` block in the `argocd` devtool) that ArgoCD deploys itself once it's up. This mirrors the EKS split (`eks` → `argocd` → `argocd-ingress`) except the ingress layer moved from Terraform into GitOps.
 
-## Three-Repo GitOps Architecture
+## Five-Repo GitOps Architecture
 
-This repo is one of three that form the platform:
+This repo is one of five that form the platform:
 
 | Repo | Role |
 |---|---|
-| **devtools-labs** (this repo) | Infrastructure: EKS cluster + ArgoCD bootstrap |
-| **devtools-provision** | What to deploy: Helm charts for each tool under `devtools/` |
-| **devtools-definition** | How to configure: env-specific `values.yaml` overrides per tool |
+| **devtools-labs** (this repo) | Infrastructure: EKS/minikube cluster + ArgoCD bootstrap |
+| **devtools-provision** | What to deploy: Helm charts for each devtool (bitbucket, confluence, jira, argocd, woodpecker) under `devtools/` |
+| **devtools-definition** | How to configure: env-specific `values.yaml` overrides per devtool |
+| **clusters-provision** | What to deploy: Helm charts for shared cluster infra (ingress-nginx, cloudflared, external-secrets-operator) under `clusters/` |
+| **clusters-definition** | How to configure: env-specific `values.yaml` overrides per cluster-infra tool |
 
-ArgoCD's ApplicationSet (defined in `argocd.tf`) auto-discovers every directory under `devtools/*` in the provision repo and creates one Application per tool. Each application uses **two sources**: the chart from `devtools-provision` and values overrides from `devtools-definition`.
+Each `-provision`/`-definition` pair has its own ApplicationSet, following the same pattern: the ApplicationSet auto-discovers every directory under the provision repo's top-level folder (`devtools/*` or `clusters/*`) and creates one Application per tool, using **two sources** — the chart from the `-provision` repo and values overrides from the `-definition` repo.
+
+**Why split cluster infra from devtools:** devtools can depend on cluster-level infra being ready first — e.g. bitbucket's `ExternalSecret` needs `external-secrets-operator` running before it can sync. Two separate ApplicationSets let the minikube module's bootstrap enforce that ordering explicitly by waiting on `clusters-applicationset`'s apps before registering `devtools-applicationset`; a single shared ApplicationSet couldn't express that dependency.
+
+**EKS is not wired to `clusters-applicationset`** — `modules/argocd` (the EKS path) still only registers `devtools-applicationset`. If EKS is ever brought back up, cluster-level infra keeps coming from Terraform (`argocd-ingress` module) as before; only the `minikube` module's `user_data` sequences both ApplicationSets.
 
 ## What the Modules Provision
 
@@ -65,7 +71,8 @@ ArgoCD's ApplicationSet (defined in `argocd.tf`) auto-discovers every directory 
 **minikube module:**
 1. A single EC2 instance running Minikube (docker driver), built from a custom AMI (see below) with Docker/kubectl/Helm/minikube already installed — `user_data` only starts minikube and bootstraps ArgoCD
 2. ArgoCD — installed via Helm inside Minikube, `ClusterIP` only
-3. The `devtools-applicationset` Application (app-of-apps) — from here on, ArgoCD itself deploys everything else, including `nginx-ingress`, `cloudflared`, and the ArgoCD `Ingress`, as regular devtools
+3. The `clusters-applicationset` Application (app-of-apps) is registered first; `user_data` then blocks until `ingress-nginx`, `cloudflared`, and `external-secrets-operator` all report Synced+Healthy
+4. The `devtools-applicationset` Application (app-of-apps) is registered last — from here on, ArgoCD itself deploys everything else, including the ArgoCD `Ingress`, as regular devtools
 
 ## Prerequisites
 
@@ -137,6 +144,8 @@ cd terraform/live/devtools
 terragrunt run-all apply
 ```
 
+**Caution:** since `eks`, `argocd`, `argocd-ingress`, `minikube`, `rds`, and `domain-controller` are all sibling units under `terraform/live/devtools`, a plain `terragrunt run-all apply` from that directory targets **all six** — including both alternative environments (EKS and minikube) at once, which "Key Design Decisions" below explicitly warns against. Use the scoped wrapper (below) or step-by-step commands instead unless you actually want everything.
+
 Or step by step:
 ```bash
 cd terraform/live/devtools/eks           && terragrunt apply  # ~15-20 min
@@ -149,8 +158,21 @@ cd terraform/live/devtools/argocd-ingress && terragrunt apply # ~3-5 min
 Or, for the minikube environment:
 ```bash
 cd terraform/live/devtools/minikube
-terragrunt apply   # ~10-15 min; installs Minikube + ArgoCD, then ArgoCD deploys everything else
+terragrunt apply   # ~15-20 min; installs Minikube + ArgoCD, then ArgoCD deploys cluster infra, waits for it to be healthy, then deploys devtools
 ```
+
+### Minikube stack wrapper (minikube + rds + domain-controller)
+
+`terraform/live/devtools/apply-minikube-stack.sh` runs `terragrunt run-all` scoped to just `minikube`, `rds`, and `domain-controller` (via `--queue-strict-include`), so it never touches `eks`/`argocd`/`argocd-ingress`. Terragrunt's own dependency graph handles ordering: `rds` and `domain-controller` both read `minikube`'s outputs (vpc/subnets/security group), so they wait for minikube, but run in parallel with each other since neither depends on the other.
+
+```bash
+cd terraform/live/devtools
+./apply-minikube-stack.sh plan       # dry run
+./apply-minikube-stack.sh            # apply (interactive approval)
+./apply-minikube-stack.sh destroy
+```
+
+**Cost note:** `rds` defaults to `db.t3.micro`/20GB (free-tier). `domain-controller` defaults to `t3.small` (~$15/mo, **not** free-tier) and `instance_enabled = true` in its `terragrunt.hcl` — running this wrapper creates it. Set `instance_enabled = false` there first if you only want the RDS piece.
 
 ## Adding a New Service
 
@@ -200,5 +222,5 @@ kubectl get pods -n kube-system | grep -E "nginx|cloudflared"
 - **ArgoCD runs insecure** (`--insecure` flag) — TLS is terminated at Cloudflare; acceptable for a dev platform
 - **Two-source ApplicationSet** — the provision repo owns chart structure; the definition repo owns env-specific values, keeping configuration separate from packaging
 - **Split Terragrunt units** — `eks` and `argocd` are separate units; the `argocd` unit's `dependency` block reads cluster outputs at plan time, so providers are always configured from real values with no `-target` workaround needed
-- **EKS and minikube are alternatives, not simultaneous** — both bootstrap the same `devtools-applicationset` Application against the same `devtools-provisions`/`devtools-definition` repos. They also share one Cloudflare tunnel, so running both clusters at once would race two `cloudflared` Deployments and (if `devtools-definition/devtools/argocd/values.yaml`'s `ingress.enabled` is `true`) two controllers fighting over the same `argocd` Ingress object. Destroy one before standing up the other
+- **EKS and minikube are alternatives, not simultaneous** — both bootstrap ArgoCD via Helm and a `devtools-applicationset` Application against the same `devtools-provision`/`devtools-definition` repos (minikube additionally bootstraps `clusters-applicationset` against `clusters-provision`/`clusters-definition` first — EKS does not). They also share one Cloudflare tunnel, so running both clusters at once would race two `cloudflared` Deployments and (if `devtools-definition/devtools/argocd/values.yaml`'s `ingress.enabled` is `true`) two controllers fighting over the same `argocd` Ingress object. Destroy one before standing up the other
 - **minikube instance boots from a custom AMI, not stock Amazon Linux** — the instance is torn down and recreated often; baking Docker/kubectl/Helm/minikube into a golden AMI (built via Packer, see "Building the Minikube base AMI") removes several flaky external downloads from the boot-time critical path, leaving `user_data` with only the fast, instance-specific steps

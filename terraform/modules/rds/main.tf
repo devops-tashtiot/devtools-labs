@@ -1,6 +1,6 @@
 resource "aws_db_subnet_group" "this" {
   name       = "${var.identifier}-subnet-group"
-  subnet_ids = var.subnet_ids
+  subnet_ids = data.aws_subnets.target.ids
 
   tags = {
     Name    = "${var.identifier}-subnet-group"
@@ -9,15 +9,21 @@ resource "aws_db_subnet_group" "this" {
 }
 
 resource "aws_security_group" "rds" {
-  name        = "${var.identifier}-rds-sg"
-  description = "Allow PostgreSQL from EKS nodes"
-  vpc_id      = var.vpc_id
+  # name_prefix (not a fixed name) + create_before_destroy: the RDS instance
+  # still holds an ENI on this SG, and this session's role can't detach ENIs
+  # directly (AuthFailure on ec2:DetachNetworkInterface) — the DB instance
+  # must be moved onto the new SG first so RDS itself detaches the ENI,
+  # which requires the new SG to exist (and thus be uniquely named) before
+  # the old one is destroyed.
+  name_prefix = "${var.identifier}-rds-sg-"
+  description = "Allow PostgreSQL from the spoke subnets"
+  vpc_id      = data.aws_vpc.selected.id
 
   ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = var.allowed_security_group_ids
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidr_blocks
   }
 
   egress {
@@ -30,6 +36,10 @@ resource "aws_security_group" "rds" {
   tags = {
     Name    = "${var.identifier}-rds-sg"
     Project = var.project_name
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 

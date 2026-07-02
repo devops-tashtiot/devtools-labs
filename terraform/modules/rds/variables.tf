@@ -4,17 +4,19 @@ variable "identifier" {
 }
 
 variable "vpc_id" {
-  description = "VPC ID"
+  description = "Explicit VPC ID. Leave empty to auto-discover the first VPC in the account."
   type        = string
+  default     = ""
 }
 
-variable "subnet_ids" {
-  description = "Private subnet IDs for the DB subnet group"
-  type        = list(string)
+variable "subnet_tag_filter" {
+  description = "Tag Name wildcard filter for the DB subnet group's subnets."
+  type        = string
+  default     = "spokeSubnet"
 }
 
-variable "allowed_security_group_ids" {
-  description = "Security group IDs allowed to reach port 5432"
+variable "allowed_cidr_blocks" {
+  description = "CIDR blocks allowed to reach port 5432."
   type        = list(string)
 }
 

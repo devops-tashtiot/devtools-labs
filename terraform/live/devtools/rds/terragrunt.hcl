@@ -6,28 +6,22 @@ include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-dependency "minikube" {
-  config_path = "../minikube"
-
-  mock_outputs_allowed_terraform_commands = ["destroy"]
-  mock_outputs = {
-    vpc_id             = "vpc-mock"
-    subnet_ids         = ["subnet-mock-1", "subnet-mock-2"]
-    security_group_id  = "sg-mock"
-  }
-}
-
 inputs = {
-  identifier  = "devtools-rds"
-  vpc_id      = dependency.minikube.outputs.vpc_id
-  subnet_ids  = dependency.minikube.outputs.subnet_ids
+  identifier = "devtools-rds"
 
-  allowed_security_group_ids = [
-    dependency.minikube.outputs.security_group_id,
-  ]
+  # No dependency on minikube: auto-discovers the account's only VPC and
+  # filters subnets by the same "spokeSubnet" tag minikube/domain-controller
+  # use, so this unit can apply in parallel with them instead of waiting.
+  vpc_id            = ""
+  subnet_tag_filter = "spokeSubnet"
 
-  db_name         = "bitbucket"
-  db_username     = "devtools"
-  db_password     = "bitbucket-db-2024"
+  # CIDR-based ingress instead of referencing minikube's security group —
+  # same reachability (minikube/domain-controller both live in these spoke
+  # subnets), but doesn't require minikube's SG ID at plan time.
+  allowed_cidr_blocks = ["10.3.65.0/24", "10.3.66.0/24"]
+
+  db_name          = "bitbucket"
+  db_username      = "devtools"
+  db_password      = "bitbucket-db-2024"
   postgres_version = "17"
 }
