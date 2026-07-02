@@ -66,23 +66,19 @@ resource "aws_vpc_security_group_egress_rule" "all_out" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "ldap" {
-  count = var.minikube_security_group_id != "" ? 1 : 0
-
-  security_group_id            = aws_security_group.windows.id
-  description                  = "LDAP from Bitbucket/minikube"
-  from_port                    = 389
-  to_port                      = 389
-  ip_protocol                  = "tcp"
-  referenced_security_group_id = var.minikube_security_group_id
+  security_group_id = aws_security_group.windows.id
+  description       = "LDAP from VPC only"
+  from_port         = 389
+  to_port           = 389
+  ip_protocol       = "tcp"
+  cidr_ipv4         = local.vpc_cidr
 }
 
 resource "aws_vpc_security_group_ingress_rule" "ldaps" {
-  count = var.minikube_security_group_id != "" ? 1 : 0
-
-  security_group_id            = aws_security_group.windows.id
-  description                  = "LDAPS from Bitbucket/minikube"
-  from_port                    = 636
-  to_port                      = 636
-  ip_protocol                  = "tcp"
-  referenced_security_group_id = var.minikube_security_group_id
+  security_group_id = aws_security_group.windows.id
+  description       = "LDAPS from VPC only"
+  from_port         = 636
+  to_port           = 636
+  ip_protocol       = "tcp"
+  cidr_ipv4         = local.vpc_cidr
 }

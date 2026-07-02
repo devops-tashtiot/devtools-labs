@@ -52,12 +52,6 @@ variable "key_pair_name" {
   default     = ""
 }
 
-variable "minikube_security_group_id" {
-  description = "Security group of the minikube/Bitbucket instance, allow-listed for inbound LDAP (389) and LDAPS (636). Leave empty to skip the rule."
-  type        = string
-  default     = ""
-}
-
 variable "promote_domain_controller" {
   description = "If true, user_data installs AD DS and promotes this instance as a new forest's first domain controller."
   type        = bool
