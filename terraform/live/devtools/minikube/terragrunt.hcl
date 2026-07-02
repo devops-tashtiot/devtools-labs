@@ -25,6 +25,19 @@ inputs = {
 
   argocd_chart_version = "9.4.2"
 
-  argocd_provisions_repo = "https://github.com/devops-tashtiot/devtools-provisions"
+  argocd_provision_repo  = "https://github.com/devops-tashtiot/devtools-provision"
   argocd_definition_repo = "https://github.com/devops-tashtiot/devtools-definition"
+
+  clusters_provision_repo  = "https://github.com/devops-tashtiot/clusters-provision"
+  clusters_definition_repo = "https://github.com/devops-tashtiot/clusters-definition"
+
+  # Cost controls: Spot instead of On-Demand (~60-70% cheaper; "stop" on
+  # interruption keeps it safe since Bitbucket/Confluence/Jira data already
+  # lives on the separate persistent data volume, not the root volume), plus
+  # a nightly auto-stop at 21:00 Asia/Jerusalem. No auto-start — start it
+  # manually (console/CLI/SSM) when you need it.
+  enable_spot         = true
+  enable_nightly_stop = true
+  stop_schedule_cron  = "cron(0 21 * * ? *)"
+  schedule_timezone   = "Asia/Jerusalem"
 }

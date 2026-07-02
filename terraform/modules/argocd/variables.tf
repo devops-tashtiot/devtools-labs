@@ -18,7 +18,7 @@ variable "cluster_certificate_authority" {
   type = string
 }
 
-variable "argocd_provisions_repo" {
+variable "argocd_provision_repo" {
   type = string
 }
 

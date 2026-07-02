@@ -76,14 +76,50 @@ variable "argocd_chart_version" {
   default     = "9.4.2"
 }
 
-variable "argocd_provisions_repo" {
-  description = "GitOps repo holding Helm chart sources (devtools-provisions)."
+variable "argocd_provision_repo" {
+  description = "GitOps repo holding Helm chart sources (devtools-provision)."
   type        = string
-  default     = "https://github.com/devops-tashtiot/devtools-provisions"
+  default     = "https://github.com/devops-tashtiot/devtools-provision"
 }
 
 variable "argocd_definition_repo" {
   description = "GitOps repo holding env-specific values overrides (devtools-definition)."
   type        = string
   default     = "https://github.com/devops-tashtiot/devtools-definition"
+}
+
+variable "clusters_provision_repo" {
+  description = "GitOps repo holding Helm chart sources for shared cluster infrastructure (ingress, secrets, tunnel) — bootstrapped before devtools-provision so those devtools' dependencies (e.g. external-secrets-operator) are ready first."
+  type        = string
+  default     = "https://github.com/devops-tashtiot/clusters-provision"
+}
+
+variable "clusters_definition_repo" {
+  description = "GitOps repo holding env-specific values overrides for clusters-provision."
+  type        = string
+  default     = "https://github.com/devops-tashtiot/clusters-definition"
+}
+
+variable "enable_spot" {
+  description = "Request the instance as a persistent Spot Instance (~60-70% cheaper than On-Demand) instead of On-Demand. Interruption behavior is 'stop', not 'terminate', so this is safe for the same reason AMI-upgrade replacements already are: Bitbucket/Confluence/Jira data lives on the separate aws_ebs_volume.minikube_data, not the root volume."
+  type        = bool
+  default     = true
+}
+
+variable "enable_nightly_stop" {
+  description = "Create an EventBridge Scheduler rule that stops the instance daily at stop_schedule_cron. Restarting is manual (console, CLI, or SSM) — there is no matching auto-start schedule."
+  type        = bool
+  default     = true
+}
+
+variable "stop_schedule_cron" {
+  description = "EventBridge Scheduler cron expression (in schedule_timezone) for the daily stop."
+  type        = string
+  default     = "cron(0 21 * * ? *)"
+}
+
+variable "schedule_timezone" {
+  description = "IANA timezone stop_schedule_cron is evaluated in."
+  type        = string
+  default     = "Asia/Jerusalem"
 }

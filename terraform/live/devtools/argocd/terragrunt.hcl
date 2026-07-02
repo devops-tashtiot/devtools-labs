@@ -22,7 +22,7 @@ inputs = {
   cluster_endpoint              = dependency.eks.outputs.cluster_endpoint
   cluster_certificate_authority = dependency.eks.outputs.cluster_certificate_authority
 
-  argocd_provisions_repo = "https://github.com/devops-tashtiot/devtools-provisions"
+  argocd_provision_repo  = "https://github.com/devops-tashtiot/devtools-provision"
   argocd_definition_repo = "https://github.com/devops-tashtiot/devtools-definition"
   argocd_chart_version   = "9.4.2"
 }

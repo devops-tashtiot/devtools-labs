@@ -1,8 +1,9 @@
 locals {
-  # devtools-definition/application.yaml is the single source of truth for the
-  # app-of-apps bootstrap Application — fetch and apply it directly instead of
-  # duplicating its contents here.
-  application_yaml_raw_url = "${replace(var.argocd_definition_repo, "https://github.com", "https://raw.githubusercontent.com")}/main/application.yaml"
+  # devtools-definition/application.yaml and clusters-definition/application.yaml
+  # are the single sources of truth for their respective app-of-apps bootstrap
+  # Applications — fetch and apply them directly instead of duplicating here.
+  devtools_application_yaml_raw_url = "${replace(var.argocd_definition_repo, "https://github.com", "https://raw.githubusercontent.com")}/main/application.yaml"
+  clusters_application_yaml_raw_url = "${replace(var.clusters_definition_repo, "https://github.com", "https://raw.githubusercontent.com")}/main/application.yaml"
 
   # Nitro instances expose EBS volumes as NVMe devices with unpredictable
   # /dev/nvmeXn1 numbering, but AWS always creates a stable by-id symlink keyed
@@ -20,7 +21,7 @@ locals {
     # into the AMI by packer/minikube-ami/ so rebuilding this instance doesn't
     # depend on dnf/GitHub/dl.k8s.io/GCS being reachable and fast at boot time.
 
-    echo "=== [1/4] Mounting persistent data volume onto /var/lib/docker ==="
+    echo "=== [1/5] Mounting persistent data volume onto /var/lib/docker ==="
     DATA_DEV="${local.data_volume_symlink}"
     for i in $(seq 1 60); do
       [ -e "$DATA_DEV" ] && break
@@ -49,7 +50,7 @@ locals {
     mount --bind /mnt/minikube-data/docker /var/lib/docker
     systemctl start docker
 
-    echo "=== [2/4] Starting Minikube (docker driver, ${var.minikube_cpus} CPUs, ${var.minikube_memory_mb} MB RAM) ==="
+    echo "=== [2/5] Starting Minikube (docker driver, ${var.minikube_cpus} CPUs, ${var.minikube_memory_mb} MB RAM) ==="
     minikube start \
       --driver=docker \
       --force \
@@ -57,7 +58,7 @@ locals {
       --memory=${var.minikube_memory_mb} \
       --wait=all
 
-    echo "=== [3/4] Installing ArgoCD ==="
+    echo "=== [3/5] Installing ArgoCD ==="
     kubectl create namespace argocd
 
     {
@@ -70,14 +71,22 @@ locals {
       echo '    argocdServerAdminPassword: "$2a$10$OlAKK08KRfEsdW5lAbvBIuehF6oXILP1C0YKYup7OoXCOwj0/Wi5C"'
       echo '    argocdServerAdminPasswordMtime: "2024-01-01T00:00:00Z"'
       echo '  repositories:'
-      echo '    devtools-provisions:'
-      echo '      url: ${var.argocd_provisions_repo}'
+      echo '    devtools-provision:'
+      echo '      url: ${var.argocd_provision_repo}'
       echo '      type: git'
-      echo '      name: devtools-provisions'
+      echo '      name: devtools-provision'
       echo '    devtools-definition:'
       echo '      url: ${var.argocd_definition_repo}'
       echo '      type: git'
       echo '      name: devtools-definition'
+      echo '    clusters-provision:'
+      echo '      url: ${var.clusters_provision_repo}'
+      echo '      type: git'
+      echo '      name: clusters-provision'
+      echo '    clusters-definition:'
+      echo '      url: ${var.clusters_definition_repo}'
+      echo '      type: git'
+      echo '      name: clusters-definition'
       echo 'server:'
       echo '  extraArgs:'
       echo '    - --insecure'
@@ -123,10 +132,32 @@ locals {
 
     rm -f /tmp/argocd-values.yaml
 
-    echo "=== [4/4] Registering devtools ApplicationSet (app-of-apps) ==="
-    curl -fsSL ${local.application_yaml_raw_url} | kubectl apply -f -
+    echo "=== [4/5] Registering clusters ApplicationSet (app-of-apps) ==="
+    curl -fsSL ${local.clusters_application_yaml_raw_url} | kubectl apply -f -
 
-    echo "=== Bootstrap complete — ArgoCD installed (ClusterIP only). Ingress, cloudflared, and everything else is now managed by the devtools ApplicationSet via GitOps. ==="
+    # devtools (bitbucket/confluence/jira/...) depend on cluster-level infra —
+    # e.g. bitbucket's ExternalSecret needs external-secrets-operator running,
+    # ingress needs ingress-nginx/cloudflared up, and ArgoCD's own OIDC values
+    # (registered as part of the devtools ApplicationSet) need rhbk's client
+    # to already exist — so block here until the ApplicationSet-generated
+    # Applications exist and report Synced+Healthy before registering the
+    # devtools ApplicationSet.
+    for app in ingress-nginx cloudflared external-secrets-operator rhbk; do
+      echo "--- Waiting for cluster app '$app' to be Synced+Healthy ---"
+      sync="" health=""
+      for i in $(seq 1 120); do
+        sync=$(kubectl get application.argoproj.io "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+        health=$(kubectl get application.argoproj.io "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+        [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ] && break
+        sleep 5
+      done
+      [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ] || { echo "$app never became Synced+Healthy (sync=$sync health=$health)" >&2; exit 1; }
+    done
+
+    echo "=== [5/5] Registering devtools ApplicationSet (app-of-apps) ==="
+    curl -fsSL ${local.devtools_application_yaml_raw_url} | kubectl apply -f -
+
+    echo "=== Bootstrap complete — ArgoCD installed (ClusterIP only). Cluster infra (ingress-nginx, cloudflared, external-secrets-operator, rhbk) and devtools are now managed by their respective ApplicationSets via GitOps. ==="
   SCRIPT
 }
 
@@ -176,12 +207,26 @@ resource "aws_instance" "minikube" {
   }
 
   metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"
+    http_endpoint = "enabled"
+    http_tokens   = "required"
     # 3, not 2: minikube's docker driver nests pod netns -> node container -> host,
     # one hop deeper than a single Docker layer. Needed for External Secrets
     # Operator (and anything else) to reach IMDS for the instance's IAM role.
     http_put_response_hop_limit = 3
+  }
+
+  # "persistent" + "stop" (not "terminate"): on Spot interruption AWS stops the
+  # instance instead of destroying it, so the root volume and instance ID
+  # survive and it comes back automatically once capacity is available again.
+  dynamic "instance_market_options" {
+    for_each = var.enable_spot ? [1] : []
+    content {
+      market_type = "spot"
+      spot_options {
+        spot_instance_type             = "persistent"
+        instance_interruption_behavior = "stop"
+      }
+    }
   }
 
   tags = {

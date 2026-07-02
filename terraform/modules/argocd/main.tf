@@ -22,10 +22,10 @@ resource "helm_release" "argocd" {
           argocdServerAdminPasswordMtime = "2024-01-01T00:00:00Z"
         }
         repositories = {
-          devtools-provisions = {
-            url  = var.argocd_provisions_repo
+          devtools-provision = {
+            url  = var.argocd_provision_repo
             type = "git"
-            name = "devtools-provisions"
+            name = "devtools-provision"
           }
           devtools-definition = {
             url  = var.argocd_definition_repo
