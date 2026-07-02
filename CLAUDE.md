@@ -64,6 +64,7 @@ Each `-provision`/`-definition` pair has its own ApplicationSet, following the s
 1. A Windows Server 2022 EC2 instance (`instance_enabled` toggles whether it's created at all)
 2. Optionally promotes itself to an Active Directory forest (`promote_domain_controller = true`) — bootstraps a domain, an OU, an LDAP bind account, a sample user, and a group, for testing Bitbucket's LDAP integration
 3. Access is via SSM Session Manager / Fleet Manager (browser RDP) — no open admin ports, no NAT/public IP needed
+4. Publishes `ldap://<current-private_ip>:389` to the `/devtools/domain-controller/ldap-connection-url` SSM parameter on every apply (`aws_ssm_parameter.ldap_connection_url`) — the stable address consumers (RHBK) read instead of a literal IP that would go stale if the instance is ever replaced. A private Route53 hosted zone was tried first for this but **this account's Horizon LZ org-wide SCP has an explicit deny on `route53:CreateHostedZone`** — don't re-attempt a Route53-based approach here without first confirming that policy has changed
 
 ## Prerequisites
 
@@ -90,7 +91,7 @@ aws ssm put-parameter --name /devtools/domain-controller/admin-password --type S
 aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-username --type SecureString --value "svc-devops-tashtiot" --profile 342831714456_Workload-Admin-PS --region il-central-1
 aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-password --type SecureString --value "<password>" --profile 342831714456_Workload-Admin-PS --region il-central-1
 ```
-Until these exist, `terragrunt apply` still succeeds (the instance boots) but `ad-bootstrap.ps1.tftpl` fails to fetch them and forest promotion/LDAP object creation never completes.
+Until these exist, `terragrunt apply` still succeeds (the instance boots) but `ad-bootstrap.ps1.tftpl` fails to fetch them and forest promotion/LDAP object creation never completes. Note `/devtools/domain-controller/ldap-connection-url` is *not* a prerequisite — the module writes that one itself on every apply (see "domain-controller module" above).
 
 ## Building the Minikube base AMI
 
@@ -194,3 +195,4 @@ kubectl get pods -n kube-system | grep -E "nginx|cloudflared"
 - **Two-source ApplicationSet** — the provision repo owns chart structure; the definition repo owns env-specific values, keeping configuration separate from packaging
 - **Three independent Terragrunt units, no dependency graph** — `minikube`, `rds`, and `domain-controller` each resolve their own VPC/subnets rather than reading another unit's outputs, so any one can be applied/destroyed independently of the others (see "Three independent units" above)
 - **minikube instance boots from a custom AMI, not stock Amazon Linux** — the instance is torn down and recreated often; baking Docker/kubectl/Helm/minikube into a golden AMI (built via Packer, see "Building the Minikube base AMI") removes several flaky external downloads from the boot-time critical path, leaving `user_data` with only the fast, instance-specific steps
+- **Route53 is unusable in this account** — the Horizon LZ org-wide SCP has an explicit deny on `route53:CreateHostedZone` (hit while building domain-controller's LDAP DNS name, see "domain-controller module" above). Anything needing stable internal service discovery in this account has to use an SSM-parameter-published value (or similar) instead of a private hosted zone
