@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# Applies (or plans/destroys) the minikube environment's full unit set in one
-# command: minikube, rds, domain-controller. Terragrunt's dependency graph
-# handles ordering and parallelism on its own — rds and domain-controller
-# both read minikube's outputs (vpc_id/subnet_ids/security_group_id), so
-# minikube runs first, then rds and domain-controller run in parallel since
-# neither depends on the other.
-#
-# Deliberately excludes eks/argocd/argocd-ingress (the EKS alternative
-# environment, see devtools-labs/CLAUDE.md "Key Design Decisions") via
-# --queue-strict-include, so this never accidentally stands up EKS.
+# Applies (or plans/destroys) all three live units in one command: minikube,
+# rds, domain-controller. None of them has a terragrunt `dependency` block on
+# either of the others (see devtools-labs/CLAUDE.md), so `run-all` applies
+# all three in parallel.
 #
 # Usage:
 #   ./apply-minikube-stack.sh            # apply (interactive approval)
