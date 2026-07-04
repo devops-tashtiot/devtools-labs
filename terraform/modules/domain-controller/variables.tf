@@ -107,9 +107,9 @@ variable "sample_user_username" {
 }
 
 variable "sample_user_password" {
-  description = "Password for the sample end-user account. Matches the lab-wide '123456' convention."
+  description = "Password for the sample end-user account. Must satisfy AD's default domain password complexity policy (this module no longer relaxes it - see ad-bootstrap.ps1.tftpl)."
   type        = string
-  default     = "123456"
+  default     = "Cc123456Cc123456!"
   sensitive   = true
 }
 

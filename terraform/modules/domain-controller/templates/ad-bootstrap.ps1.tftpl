@@ -1,196 +1,222 @@
-<powershell>
-Start-Transcript -Path C:\ad-bootstrap.log -Append
+version: 1.1
+tasks:
+  - task: executeScript
+    inputs:
+      - frequency: always
+        type: powershell
+        runAs: admin
+        content: |-
+          Start-Transcript -Path C:\ad-bootstrap.log -Append
 
-# Fetches a decrypted SecureString value from SSM Parameter Store. Used so the
-# admin username/password never appear in EC2 user-data or Terraform state —
-# only the parameter *path* is baked in, the value is fetched at boot instead.
-# Relies on AWS Tools for PowerShell, preinstalled on Amazon's own Windows AMIs.
-function Get-SsmParameterValue {
-    param([string]$Name)
-    return (Get-SSMParameter -Name $Name -WithDecryption $true).Value
-}
+          # Fetches a decrypted SecureString value from SSM Parameter Store. Used so the
+          # admin username/password never appear in EC2 user-data or Terraform state -
+          # only the parameter *path* is baked in, the value is fetched at boot instead.
+          # Relies on AWS Tools for PowerShell, preinstalled on Amazon's own Windows AMIs.
+          function Get-SsmParameterValue {
+              param([string]$Name)
+              return (Get-SSMParameter -Name $Name -WithDecryption $true).Value
+          }
 
-# Returns $true once the AD-Domain-Services Windows feature is installed.
-function Test-AdDomainServicesInstalled {
-    return (Get-WindowsFeature -Name AD-Domain-Services).Installed
-}
+          # Returns $true once the AD-Domain-Services Windows feature is installed.
+          function Test-AdDomainServicesInstalled {
+              return (Get-WindowsFeature -Name AD-Domain-Services).Installed
+          }
 
-# Installs the AD-Domain-Services Windows feature and its management tools.
-function Install-AdDomainServicesFeature {
-    Write-Output "=== Installing AD-Domain-Services ==="
-    Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
-}
+          # Installs the AD-Domain-Services Windows feature and its management tools.
+          function Install-AdDomainServicesFeature {
+              Write-Output "=== Installing AD-Domain-Services ==="
+              Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
+          }
 
-# Relaxes the LOCAL security policy's password complexity/length requirements.
-# Lab convention only: simple shared passwords, never do this in production.
-function Set-RelaxedLocalPasswordPolicy {
-    Write-Output "=== Relaxing local password complexity (lab convention: simple shared passwords) ==="
-    secedit /export /cfg C:\secpol.cfg | Out-Null
-    (Get-Content C:\secpol.cfg) `
-        -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0' `
-        -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 0' `
-        | Set-Content C:\secpol.cfg
-    secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY | Out-Null
-}
+          # Promotes this node into the first domain controller of a brand-new AD forest.
+          # Install-ADDSForest reboots automatically; the script resumes on next boot
+          # because this task's frequency is "always" (see the YAML wrapper above) -
+          # EC2Launch v2 ignores the legacy EC2Config <persist>true</persist> tag (it
+          # hardcodes XML-format user-data to run once ever), so "always" here is what
+          # actually re-invokes this script on every boot.
+          function Invoke-ForestPromotion {
+              param(
+                  [string]$DomainName,
+                  [string]$DomainNetbiosName,
+                  [string]$SafeModeAdminPassword
+              )
+              $safeModePwd = ConvertTo-SecureString $SafeModeAdminPassword -AsPlainText -Force
+              Write-Output "=== Promoting to first domain controller of new forest $DomainName ==="
+              Install-ADDSForest `
+                  -DomainName $DomainName `
+                  -DomainNetbiosName $DomainNetbiosName `
+                  -SafeModeAdministratorPassword $safeModePwd `
+                  -InstallDns `
+                  -NoRebootOnCompletion:$false `
+                  -Force
+          }
 
-# Promotes this node into the first domain controller of a brand-new AD forest.
-# Install-ADDSForest reboots automatically; the script resumes on next boot
-# because the EC2 user-data is marked <persist>true</persist> below.
-function Invoke-ForestPromotion {
-    param(
-        [string]$DomainName,
-        [string]$DomainNetbiosName,
-        [string]$SafeModeAdminPassword
-    )
-    $safeModePwd = ConvertTo-SecureString $SafeModeAdminPassword -AsPlainText -Force
-    Write-Output "=== Promoting to first domain controller of new forest $DomainName ==="
-    Install-ADDSForest `
-        -DomainName $DomainName `
-        -DomainNetbiosName $DomainNetbiosName `
-        -SafeModeAdministratorPassword $safeModePwd `
-        -InstallDns `
-        -NoRebootOnCompletion:$false `
-        -Force
-}
+          # Returns $true once the NTDS service exists - it's absent while forest
+          # promotion is still finishing across the automatic reboot above.
+          function Test-DomainControllerReady {
+              return [bool](Get-Service NTDS -ErrorAction SilentlyContinue)
+          }
 
-# Returns $true once the NTDS service exists — it's absent while forest
-# promotion is still finishing across the automatic reboot above.
-function Test-DomainControllerReady {
-    return [bool](Get-Service NTDS -ErrorAction SilentlyContinue)
-}
+          # Marks that Invoke-ForestPromotion has been triggered and its automatic
+          # reboot is pending/in progress, so a later boot can tell "promotion is
+          # still finishing" apart from "promotion was never (successfully) started" -
+          # Install-WindowsFeature succeeding earlier doesn't imply promotion did.
+          $script:PromotionMarkerPath = "C:\ad-bootstrap-state\forest-promotion-in-progress.marker"
 
-# Relaxes the DOMAIN-wide password policy the same way as the local one above.
-function Set-RelaxedDomainPasswordPolicy {
-    param([string]$DomainName)
-    Write-Output "=== Relaxing domain password complexity (lab convention: simple shared passwords) ==="
-    Set-ADDefaultDomainPasswordPolicy -Identity $DomainName -ComplexityEnabled $false -MinPasswordLength 1
-}
+          function Test-ForestPromotionInProgress {
+              return (Test-Path $script:PromotionMarkerPath)
+          }
 
-# Creates the given OU at the domain root if it doesn't already exist, and
-# returns its distinguished-name path for callers to create objects under.
-function New-OrganizationalUnit {
-    param(
-        [string]$Name,
-        [string]$BaseDn
-    )
-    $ouPath = "OU=$Name,$BaseDn"
-    if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$Name'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name $Name -Path $BaseDn -ProtectedFromAccidentalDeletion $false
-    }
-    return $ouPath
-}
+          function Set-ForestPromotionInProgress {
+              New-Item -ItemType Directory -Path (Split-Path $script:PromotionMarkerPath) -Force | Out-Null
+              New-Item -ItemType File -Path $script:PromotionMarkerPath -Force | Out-Null
+          }
 
-# Creates the read-only service account Bitbucket uses to bind to LDAP, if missing.
-function New-LdapBindAccount {
-    param(
-        [string]$Username,
-        [string]$Password,
-        [string]$DomainName,
-        [string]$OuPath
-    )
-    if (-not (Get-ADUser -Filter "SamAccountName -eq '$Username'" -ErrorAction SilentlyContinue)) {
-        New-ADUser -Name $Username -SamAccountName $Username `
-            -UserPrincipalName "$Username@$DomainName" -Path $OuPath `
-            -AccountPassword (ConvertTo-SecureString $Password -AsPlainText -Force) `
-            -Enabled $true -PasswordNeverExpires $true `
-            -Description "Read-only bind account for Bitbucket LDAP directory sync"
-    }
-}
+          function Clear-ForestPromotionInProgress {
+              Remove-Item -Path $script:PromotionMarkerPath -Force -ErrorAction SilentlyContinue
+          }
 
-# Creates a sample end-user account for testing Bitbucket LDAP login, if missing.
-function New-SampleUser {
-    param(
-        [string]$Username,
-        [string]$Password,
-        [string]$DomainName,
-        [string]$OuPath
-    )
-    if (-not (Get-ADUser -Filter "SamAccountName -eq '$Username'" -ErrorAction SilentlyContinue)) {
-        New-ADUser -Name $Username -SamAccountName $Username `
-            -UserPrincipalName "$Username@$DomainName" -Path $OuPath `
-            -AccountPassword (ConvertTo-SecureString $Password -AsPlainText -Force) `
-            -Enabled $true -PasswordNeverExpires $true `
-            -Description "Sample user for testing Bitbucket LDAP login"
-    }
-}
+          # Creates the given OU at the domain root if it doesn't already exist, and
+          # returns its distinguished-name path for callers to create objects under.
+          function New-OrganizationalUnit {
+              param(
+                  [string]$Name,
+                  [string]$BaseDn
+              )
+              $ouPath = "OU=$Name,$BaseDn"
+              if (-not (Get-ADOrganizationalUnit -Filter "Name -eq '$Name'" -ErrorAction SilentlyContinue)) {
+                  New-ADOrganizationalUnit -Name $Name -Path $BaseDn -ProtectedFromAccidentalDeletion $false
+              }
+              return $ouPath
+          }
 
-# Creates the AD security group if missing, and ensures the given member
-# account belongs to it.
-function New-AdGroupWithMember {
-    param(
-        [string]$GroupName,
-        [string]$OuPath,
-        [string]$MemberUsername
-    )
-    if (-not (Get-ADGroup -Filter "Name -eq '$GroupName'" -ErrorAction SilentlyContinue)) {
-        New-ADGroup -Name $GroupName -SamAccountName $GroupName -GroupScope Global -GroupCategory Security -Path $OuPath
-    }
-    if (-not (Get-ADGroupMember -Identity $GroupName | Where-Object { $_.SamAccountName -eq $MemberUsername })) {
-        Add-ADGroupMember -Identity $GroupName -Members $MemberUsername
-    }
-}
+          # Creates the read-only service account Bitbucket uses to bind to LDAP, if missing.
+          function New-LdapBindAccount {
+              param(
+                  [string]$Username,
+                  [string]$Password,
+                  [string]$DomainName,
+                  [string]$OuPath
+              )
+              if (-not (Get-ADUser -Filter "SamAccountName -eq '$Username'" -ErrorAction SilentlyContinue)) {
+                  New-ADUser -Name $Username -SamAccountName $Username `
+                      -UserPrincipalName "$Username@$DomainName" -Path $OuPath `
+                      -AccountPassword (ConvertTo-SecureString $Password -AsPlainText -Force) `
+                      -Enabled $true -PasswordNeverExpires $true `
+                      -Description "Read-only bind account for Bitbucket LDAP directory sync"
+              }
+          }
 
-# Once this node is a working domain controller, ensures the Bitbucket-specific
-# LDAP objects (OU, bind account, sample user, group) all exist.
-function Initialize-BitbucketLdapObjects {
-    param(
-        [string]$DomainName,
-        [string]$BaseDn,
-        [string]$OuName,
-        [string]$LdapBindUsername,
-        [string]$LdapBindPassword,
-        [string]$SampleUserUsername,
-        [string]$SampleUserPassword,
-        [string]$AdGroupName,
-        [string]$AdGroupMemberUsername
-    )
-    Write-Output "=== Domain controller ready — ensuring Bitbucket LDAP objects exist ==="
-    Import-Module ActiveDirectory
+          # Creates a sample end-user account for testing Bitbucket LDAP login, if missing.
+          function New-SampleUser {
+              param(
+                  [string]$Username,
+                  [string]$Password,
+                  [string]$DomainName,
+                  [string]$OuPath
+              )
+              if (-not (Get-ADUser -Filter "SamAccountName -eq '$Username'" -ErrorAction SilentlyContinue)) {
+                  New-ADUser -Name $Username -SamAccountName $Username `
+                      -UserPrincipalName "$Username@$DomainName" -Path $OuPath `
+                      -AccountPassword (ConvertTo-SecureString $Password -AsPlainText -Force) `
+                      -Enabled $true -PasswordNeverExpires $true `
+                      -Description "Sample user for testing Bitbucket LDAP login"
+              }
+          }
 
-    Set-RelaxedDomainPasswordPolicy -DomainName $DomainName
+          # Creates the AD security group if missing, and ensures the given member
+          # account belongs to it.
+          function New-AdGroupWithMember {
+              param(
+                  [string]$GroupName,
+                  [string]$OuPath,
+                  [string]$MemberUsername
+              )
+              if (-not (Get-ADGroup -Filter "Name -eq '$GroupName'" -ErrorAction SilentlyContinue)) {
+                  New-ADGroup -Name $GroupName -SamAccountName $GroupName -GroupScope Global -GroupCategory Security -Path $OuPath
+              }
+              if (-not (Get-ADGroupMember -Identity $GroupName | Where-Object { $_.SamAccountName -eq $MemberUsername })) {
+                  Add-ADGroupMember -Identity $GroupName -Members $MemberUsername
+              }
+          }
 
-    $ouPath = New-OrganizationalUnit -Name $OuName -BaseDn $BaseDn
-    New-LdapBindAccount -Username $LdapBindUsername -Password $LdapBindPassword -DomainName $DomainName -OuPath $ouPath
-    New-SampleUser -Username $SampleUserUsername -Password $SampleUserPassword -DomainName $DomainName -OuPath $ouPath
-    New-AdGroupWithMember -GroupName $AdGroupName -OuPath $ouPath -MemberUsername $AdGroupMemberUsername
+          # Once this node is a working domain controller, ensures the Bitbucket-specific
+          # LDAP objects (OU, bind account, sample user, group) all exist.
+          function Initialize-BitbucketLdapObjects {
+              param(
+                  [string]$DomainName,
+                  [string]$BaseDn,
+                  [string]$OuName,
+                  [string]$LdapBindUsername,
+                  [string]$LdapBindPassword,
+                  [string]$SampleUserUsername,
+                  [string]$SampleUserPassword,
+                  [string]$AdGroupName,
+                  [string]$AdGroupMemberUsername
+              )
+              Write-Output "=== Domain controller ready - ensuring Bitbucket LDAP objects exist ==="
+              Import-Module ActiveDirectory
 
-    Write-Output "=== AD bootstrap complete ==="
-}
+              $ouPath = New-OrganizationalUnit -Name $OuName -BaseDn $BaseDn
+              New-SampleUser -Username $SampleUserUsername -Password $SampleUserPassword -DomainName $DomainName -OuPath $ouPath
+              New-AdGroupWithMember -GroupName $AdGroupName -OuPath $ouPath -MemberUsername $AdGroupMemberUsername
 
-# --- Main bootstrap flow -----------------------------------------------------
-# EC2 re-runs this whole script on every boot (persist=true below); the three
-# branches make it idempotent across the multi-reboot forest promotion and any
-# later reboot once the domain controller is already up.
-if (-not (Test-AdDomainServicesInstalled)) {
-    Install-AdDomainServicesFeature
-    Set-RelaxedLocalPasswordPolicy
+              Write-Output "=== AD bootstrap complete ==="
+          }
 
-    $adminUsername = Get-SsmParameterValue -Name "${admin_username_ssm_parameter}"
-    $adminPassword = Get-SsmParameterValue -Name "${admin_password_ssm_parameter}"
-    Write-Output "=== DSRM/local Administrator account: $adminUsername (password from SSM, not logged) ==="
+          # --- Main bootstrap flow -----------------------------------------------------
+          # This task's frequency is "always" (YAML wrapper above), so EC2Launch v2
+          # re-runs this whole script on every boot; the three branches make it
+          # idempotent across the multi-reboot forest promotion and any later reboot
+          # once the domain controller              New-LdapBindAccount -Username $LdapBindUsername -Password $LdapBindPassword -DomainName $DomainName -OuPath $ouPath
+ is already up.
+          #
+          # The middle branch used to gate solely on Test-AdDomainServicesInstalled -
+          # but Install-WindowsFeature succeeds independently of whether the later
+          # Install-ADDSForest call succeeds, so a promotion failure left
+          # AD-Domain-Services "installed" forever, permanently stuck saying "still
+          # finishing" on every later boot with promotion never retried and LDAP (389)
+          # never coming up. The in-progress marker below distinguishes "promotion
+          # triggered, waiting on its automatic reboot" from "never successfully
+          # triggered", so a failed attempt is retried on the next boot instead of
+          # stalling forever.
+          if (Test-DomainControllerReady) {
+              $ldapBindUsername = Get-SsmParameterValue -Name "${ldap_bind_username_ssm_parameter}"
+              $ldapBindPassword = Get-SsmParameterValue -Name "${ldap_bind_password_ssm_parameter}"
 
-    Invoke-ForestPromotion `
-        -DomainName "${domain_name}" `
-        -DomainNetbiosName "${domain_netbios_name}" `
-        -SafeModeAdminPassword $adminPassword
-} elseif (-not (Test-DomainControllerReady)) {
-    Write-Output "=== AD DS role installed, forest promotion still finishing — will retry next boot ==="
-} else {
-    $ldapBindUsername = Get-SsmParameterValue -Name "${ldap_bind_username_ssm_parameter}"
-    $ldapBindPassword = Get-SsmParameterValue -Name "${ldap_bind_password_ssm_parameter}"
+              Initialize-BitbucketLdapObjects `
+                  -DomainName "${domain_name}" `
+                  -BaseDn "${base_dn}" `
+                  -OuName "${ou_name}" `
+                  -LdapBindUsername $ldapBindUsername `
+                  -LdapBindPassword $ldapBindPassword `
+                  -SampleUserUsername "${sample_user_username}" `
+                  -SampleUserPassword "${sample_user_password}" `
+                  -AdGroupName "${ad_group_name}" `
+                  -AdGroupMemberUsername "${ad_group_member_username}"
+          } elseif (Test-ForestPromotionInProgress) {
+              Write-Output "=== Forest promotion already triggered, waiting for its automatic reboot to finish - will retry next boot ==="
+          } else {
+              if (-not (Test-AdDomainServicesInstalled)) {
+                  Install-AdDomainServicesFeature
+              }
 
-    Initialize-BitbucketLdapObjects `
-        -DomainName "${domain_name}" `
-        -BaseDn "${base_dn}" `
-        -OuName "${ou_name}" `
-        -LdapBindUsername $ldapBindUsername `
-        -LdapBindPassword $ldapBindPassword `
-        -SampleUserUsername "${sample_user_username}" `
-        -SampleUserPassword "${sample_user_password}" `
-        -AdGroupName "${ad_group_name}" `
-        -AdGroupMemberUsername "${ad_group_member_username}"
-}
+              $adminUsername = Get-SsmParameterValue -Name "${admin_username_ssm_parameter}"
+              $adminPassword = Get-SsmParameterValue -Name "${admin_password_ssm_parameter}"
+              Write-Output "=== DSRM/local Administrator account: $adminUsername (password from SSM, not logged) ==="
 
-Stop-Transcript
-</powershell>
-<persist>true</persist>
+              Set-ForestPromotionInProgress
+              try {
+                  Invoke-ForestPromotion `
+                      -DomainName "${domain_name}" `
+                      -DomainNetbiosName "${domain_netbios_name}" `
+                      -SafeModeAdminPassword $adminPassword
+              } catch {
+                  Write-Output "=== Forest promotion FAILED: $($_.Exception.Message) ==="
+                  Write-Output "=== Clearing in-progress marker so the next boot retries ==="
+                  Clear-ForestPromotionInProgress
+                  throw
+              }
+          }
+
+          Stop-Transcript
