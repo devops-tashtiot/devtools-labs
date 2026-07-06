@@ -124,3 +124,21 @@ variable "ad_group_member_username" {
   type        = string
   default     = "svc-devops-tashtiot"
 }
+
+variable "enable_nightly_stop" {
+  description = "Create an EventBridge Scheduler rule that stops the instance daily at stop_schedule_cron. Restarting is manual (console, CLI, or SSM) — there is no matching auto-start schedule. Has no effect when instance_enabled is false."
+  type        = bool
+  default     = true
+}
+
+variable "stop_schedule_cron" {
+  description = "EventBridge Scheduler cron expression (in schedule_timezone) for the daily stop."
+  type        = string
+  default     = "cron(0 21 * * ? *)"
+}
+
+variable "schedule_timezone" {
+  description = "IANA timezone stop_schedule_cron is evaluated in."
+  type        = string
+  default     = "Asia/Jerusalem"
+}

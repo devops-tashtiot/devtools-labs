@@ -29,6 +29,13 @@ generate "provider" {
     provider "aws" {
       region  = "${local.aws_region}"
       profile = "${local.aws_profile}"
+
+      default_tags {
+        tags = {
+          Project = "devops-tashtiot"
+          Repo    = "${local.project_name}"
+        }
+      }
     }
   EOF
 }

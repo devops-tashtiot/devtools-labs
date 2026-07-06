@@ -3,8 +3,7 @@ resource "aws_db_subnet_group" "this" {
   subnet_ids = data.aws_subnets.target.ids
 
   tags = {
-    Name    = "${var.identifier}-subnet-group"
-    Project = var.project_name
+    Name = "${var.identifier}-subnet-group"
   }
 }
 
@@ -34,8 +33,7 @@ resource "aws_security_group" "rds" {
   }
 
   tags = {
-    Name    = "${var.identifier}-rds-sg"
-    Project = var.project_name
+    Name = "${var.identifier}-rds-sg"
   }
 
   lifecycle {
@@ -69,6 +67,6 @@ resource "aws_db_instance" "this" {
   publicly_accessible     = false
 
   tags = {
-    Project = var.project_name
+    Name = var.identifier
   }
 }

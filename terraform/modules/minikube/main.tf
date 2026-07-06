@@ -253,9 +253,8 @@ resource "aws_instance" "minikube" {
   }
 
   tags = {
-    Name    = var.instance_name
-    Role    = "minikube"
-    Project = var.project_name
+    Name = var.instance_name
+    Role = "minikube"
   }
 
   lifecycle {

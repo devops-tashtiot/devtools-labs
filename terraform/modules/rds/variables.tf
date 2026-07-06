@@ -76,3 +76,21 @@ variable "project_name" {
   type    = string
   default = ""
 }
+
+variable "enable_nightly_stop" {
+  description = "Create an EventBridge Scheduler rule that stops the DB instance daily at stop_schedule_cron. Restarting is manual (console, CLI, or SSM) — there is no matching auto-start schedule."
+  type        = bool
+  default     = true
+}
+
+variable "stop_schedule_cron" {
+  description = "EventBridge Scheduler cron expression (in schedule_timezone) for the daily stop."
+  type        = string
+  default     = "cron(0 21 * * ? *)"
+}
+
+variable "schedule_timezone" {
+  description = "IANA timezone stop_schedule_cron is evaluated in."
+  type        = string
+  default     = "Asia/Jerusalem"
+}
