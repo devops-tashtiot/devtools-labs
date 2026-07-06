@@ -55,7 +55,7 @@ output "base_dn" {
 
 output "bitbucket_ou_dn" {
   description = "OU holding the LDAP bind account and sample user (for LDAP directory config)."
-  value       = var.promote_domain_controller ? "OU=Bitbucket,${local.base_dn}" : null
+  value       = var.promote_domain_controller ? "OU=${var.ou_name},${local.base_dn}" : null
 }
 
 output "ldap_bind_username_ssm_parameter" {
