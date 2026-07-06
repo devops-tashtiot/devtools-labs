@@ -29,7 +29,7 @@ resource "aws_iam_role_policy" "scheduler_stop_rds" {
     Statement = [{
       Effect   = "Allow"
       Action   = "rds:StopDBInstance"
-      Resource = "arn:aws:rds:${var.aws_region}:${data.aws_caller_identity.current.account_id}:db:${aws_db_instance.this.id}"
+      Resource = aws_db_instance.this.arn
     }]
   })
 }
@@ -50,7 +50,7 @@ resource "aws_scheduler_schedule" "stop_rds" {
     role_arn = aws_iam_role.scheduler_stop_rds[0].arn
 
     input = jsonencode({
-      DbInstanceIdentifier = aws_db_instance.this.id
+      DbInstanceIdentifier = aws_db_instance.this.identifier
     })
   }
 }

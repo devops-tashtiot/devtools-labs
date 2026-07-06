@@ -8,7 +8,15 @@ include "root" {
 
 inputs = {
   instance_name  = "minikube-devtools"
-  instance_type  = "t3.2xlarge" # 8 vCPU / 32 GB — t3.xlarge (4/16) was out of CPU for jira alongside bitbucket/confluence/argocd
+  # EMERGENCY ROLLBACK: attempted m5.4xlarge for more headroom, but
+  # RunInstances failed with InsufficientInstanceCapacity in il-central-1a
+  # (the only AZ available to us — the data EBS volume is AZ-locked there).
+  # The prior t3.2xlarge instance was already destroyed by the replace
+  # before the new one failed to launch, so the cluster was down. Reverting
+  # to the known-good t3.2xlarge to restore service; revisit sizing
+  # separately with a different family/generation that has confirmed
+  # capacity in il-central-1a.
+  instance_type  = "t3.2xlarge"
   root_volume_size = 50
   data_volume_size = 60
 
