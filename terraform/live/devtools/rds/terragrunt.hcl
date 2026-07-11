@@ -7,7 +7,8 @@ include "root" {
 }
 
 inputs = {
-  identifier = "devtools-rds"
+  identifier     = "devtools-rds"
+  instance_class = "db.t3.small"
 
   # No dependency on minikube: auto-discovers the account's only VPC and
   # filters subnets by the same "spokeSubnet" tag minikube/domain-controller
