@@ -1,4 +1,5 @@
 site_name: devtools-labs
+site_url: https://devops-tashtiot.github.io/devtools-labs/
 site_description: >-
   Terraform + Terragrunt infra for the self-hosted devtools platform — Minikube,
   ArgoCD bootstrap, RDS, and an AD domain controller — plus the manual
