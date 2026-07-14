@@ -21,7 +21,7 @@ locals {
     # into the AMI by packer/minikube-ami/ so rebuilding this instance doesn't
     # depend on dnf/GitHub/dl.k8s.io/GCS being reachable and fast at boot time.
 
-    echo "=== [1/5] Mounting persistent data volume onto /var/lib/docker ==="
+    echo "=== [1/6] Mounting persistent data volume onto /var/lib/docker ==="
     DATA_DEV="${local.data_volume_symlink}"
     for i in $(seq 1 60); do
       [ -e "$DATA_DEV" ] && break
@@ -50,7 +50,7 @@ locals {
     mount --bind /mnt/minikube-data/docker /var/lib/docker
     systemctl start docker
 
-    echo "=== [2/5] Installing minikube.service so the cluster survives the nightly stop/manual-start cycle ==="
+    echo "=== [2/6] Installing minikube.service so the cluster survives the nightly stop/manual-start cycle ==="
     # The nightly cost-saving stop (see schedule.tf) only stops the EC2 instance —
     # there is no matching auto-start, and even once someone starts it back up,
     # a plain `minikube start` in user_data only ever runs on first boot, not on
@@ -81,7 +81,74 @@ locals {
     systemctl daemon-reload
     systemctl enable --now minikube.service
 
-    echo "=== [3/5] Installing ArgoCD ==="
+    echo "=== [3/6] Configuring CoreDNS rewrites for in-cluster *.devopstashtiot.page routing ==="
+    # Every *.devopstashtiot.page hostname devtools call each other on (Bitbucket, Confluence,
+    # Jira, SonarQube, Artifactory, ArgoCD, RHBK) needs to resolve, for any caller running
+    # inside the cluster, straight to ingress-nginx-controller's ClusterIP instead of going out
+    # through real Cloudflare DNS — Cloudflare Access sits in front of the whole domain and
+    # blocks any non-browser (programmatic) request with its email-OTP wall, which a pod like
+    # devops-api calling another devtool (or Keycloak) hits immediately otherwise. Routing
+    # through ingress-nginx-controller (not straight to each tool's own backend Service) matters
+    # because that's where the real Cloudflare Origin Certificate for *.devopstashtiot.page is
+    # actually mounted (clusters-provision/clusters/ingress-nginx/templates/origin-cert-secret.yaml)
+    # — every devtool's own backend Service is plain HTTP only, so going straight there would
+    # mean no TLS listener at all. This was previously applied by hand, directly via kubectl,
+    # after every fresh cluster bootstrap (CoreDNS is minikube's own addon, not managed by
+    # clusters-provision/clusters-definition) — moved here so a from-scratch cluster gets it
+    # automatically instead of depending on someone remembering to reapply it.
+    #
+    # The per-consumer ArgoCD wildcard is a deliberate exception: there's no Ingress rule for
+    # arbitrary *.argocd subdomains (only the bare host is configured), so it routes straight to
+    # the one real argocd-server instead, which has its own self-signed TLS listener on 443.
+    cat <<'COREDNS_EOF' | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        log
+        errors
+        health {
+           lameduck 5s
+        }
+        ready
+        rewrite name exact argocd.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        rewrite name regex (.*)\.argocd\.devopstashtiot\.page argocd-server.argocd.svc.cluster.local answer auto
+        rewrite name exact bitbucket.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        rewrite name exact confluence.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        rewrite name exact jira.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        rewrite name exact sonarqube.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        rewrite name exact artifactory.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        rewrite name exact rhbk.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+           pods insecure
+           fallthrough in-addr.arpa ip6.arpa
+           ttl 30
+        }
+        prometheus :9153
+        hosts {
+           192.168.49.1 host.minikube.internal
+           fallthrough
+        }
+        forward . /etc/resolv.conf {
+           max_concurrent 1000
+        }
+        cache 30 {
+           disable success cluster.local
+           disable denial cluster.local
+        }
+        loop
+        reload
+        loadbalance
+    }
+COREDNS_EOF
+    kubectl rollout restart deployment coredns -n kube-system
+    kubectl rollout status deployment coredns -n kube-system --timeout=60s
+
+    echo "=== [4/6] Installing ArgoCD ==="
     kubectl create namespace argocd
 
     {
@@ -155,7 +222,7 @@ locals {
 
     rm -f /tmp/argocd-values.yaml
 
-    echo "=== [4/5] Registering clusters ApplicationSet (app-of-apps) ==="
+    echo "=== [5/6] Registering clusters ApplicationSet (app-of-apps) ==="
     curl -fsSL ${local.clusters_application_yaml_raw_url} | kubectl apply -f -
 
     # devtools (bitbucket/confluence/jira/...) depend on cluster-level infra —
@@ -177,7 +244,7 @@ locals {
       [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ] || { echo "$app never became Synced+Healthy (sync=$sync health=$health)" >&2; exit 1; }
     done
 
-    echo "=== [5/5] Registering devtools ApplicationSet (app-of-apps) ==="
+    echo "=== [6/6] Registering devtools ApplicationSet (app-of-apps) ==="
     curl -fsSL ${local.devtools_application_yaml_raw_url} | kubectl apply -f -
 
     echo "=== Bootstrap complete — ArgoCD installed (ClusterIP only). Cluster infra (ingress-nginx, cloudflared, external-secrets-operator, rhbk) and devtools are now managed by their respective ApplicationSets via GitOps. ==="
