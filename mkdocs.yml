@@ -1,0 +1,56 @@
+site_name: devtools-labs
+site_description: >-
+  Terraform + Terragrunt infra for the self-hosted devtools platform — Minikube,
+  ArgoCD bootstrap, RDS, and an AD domain controller — plus the manual
+  post-deployment steps each devtool still needs.
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Bootstrap from scratch: bootstrap.md
+  - Post-deployment setup:
+      - Jira: post-devtools-implementation/jira/README.md
+      - Confluence: post-devtools-implementation/confluence/README.md
+      - Bitbucket: post-devtools-implementation/bitbucket/README.md
+      - ArgoCD: post-devtools-implementation/argocd/README.md
