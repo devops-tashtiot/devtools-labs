@@ -5,6 +5,21 @@ destroyed) AWS account: bootstrap remote state, apply all five Terragrunt
 units, then finish the manual per-devtool configuration that isn't
 GitOps-managed.
 
+!!! important "devtools-labs creates the whole cluster + devtools stack automatically"
+    Terraform in this repo only ever touches five things: `minikube`, `rds`,
+    `domain-controller`, `cloudflare`, `devtools-secrets`. It never runs Helm
+    or `kubectl apply` against an individual cluster-infra tool or devtool.
+    Instead, the `minikube` unit's apply installs ArgoCD and registers two
+    `ApplicationSet`s — `clusters-applicationset` and
+    `devtools-applicationset` — that **auto-discover every chart** in the
+    `clusters-provision`/`devtools-provision` repos and **auto-sync** them
+    against the matching overrides in `clusters-definition`/
+    `devtools-definition`. From the moment that apply finishes, every cluster
+    infra tool (ingress, secrets sync, tunnel) and every devtool (Jira,
+    Bitbucket, Confluence, Artifactory, ArgoCD) is created, updated, and kept
+    in sync continuously — with no further Terraform, Helm, or `kubectl`
+    command from you.
+
 ## 1. Bootstrap: `aws-terraform-bootstrap`
 
 Before any Terragrunt unit in this repo can run, the S3 bucket its
@@ -83,13 +98,20 @@ beforehand to avoid juggling simultaneous prompts.
        nightly auto-stop.
     2. Installs ArgoCD via Helm inside Minikube (`ClusterIP`, `--insecure` —
        TLS terminates at Cloudflare).
-    3. Registers the `clusters-applicationset` app-of-apps and blocks until
-       `ingress-nginx`, `cloudflared`, and `external-secrets-operator` all
+    3. Registers the `clusters-applicationset` app-of-apps, which
+       **auto-discovers every chart under `clusters-provision/clusters/*`**
+       and auto-syncs it with the matching overrides from
+       `clusters-definition` — `ingress-nginx`, `cloudflared`,
+       `external-secrets-operator` all get created this way, with no manual
+       `helm install`/`kubectl apply`. The unit blocks here until all three
        report Synced+Healthy.
-    4. Registers the `devtools-applicationset` app-of-apps last. **From this
-       point on, ArgoCD deploys and manages everything else itself** — Jira,
-       Bitbucket, Confluence, Artifactory, ArgoCD's own `Ingress`, etc. —
-       Terraform never touches individual devtools again.
+    4. Registers the `devtools-applicationset` app-of-apps last, which the
+       same way **auto-discovers every chart under
+       `devtools-provision/devtools/*`** and auto-syncs it against
+       `devtools-definition` — Jira, Bitbucket, Confluence, Artifactory,
+       ArgoCD's own `Ingress`, etc. **From this point on, ArgoCD creates and
+       continuously reconciles everything else itself** — Terraform never
+       touches an individual cluster-infra tool or devtool, not even once.
 
 Once `minikube`'s apply finishes, ArgoCD is reachable at
 `https://argocd.devopstashtiot.page` — user `admin`, password is the shared
