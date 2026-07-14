@@ -92,9 +92,10 @@ beforehand to avoid juggling simultaneous prompts.
        Terraform never touches individual devtools again.
 
 Once `minikube`'s apply finishes, ArgoCD is reachable at
-`https://argocd.devopstashtiot.page` (`admin` / `123456`), and every devtool
-Application should show up Syncing/Healthy over the following few minutes as
-ArgoCD works through `devtools-applicationset`.
+`https://argocd.devopstashtiot.page` — user `admin`, password is the shared
+value at `/devtools/admin/password` in SSM Parameter Store — and every
+devtool Application should show up Syncing/Healthy over the following few
+minutes as ArgoCD works through `devtools-applicationset`.
 
 ## 3. Post-installation configuration for the devtools
 

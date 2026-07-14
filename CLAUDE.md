@@ -136,7 +136,7 @@ cd terraform/live/devtools/minikube
 terragrunt apply   # ~15-20 min; installs Minikube + ArgoCD, then ArgoCD deploys cluster infra, waits for it to be healthy, then deploys devtools
 ```
 
-**ArgoCD:** `https://argocd.devopstashtiot.page` — user `admin`, password `123456`.
+**ArgoCD:** `https://argocd.devopstashtiot.page` — user `admin`, password is the shared value at `/devtools/admin/password` in SSM Parameter Store.
 
 **Restarting after the nightly auto-stop (or any EC2 stop/start):** nothing manual is needed — `minikube.service` (installed by `user_data`, see "What the Modules Provision" → minikube module) auto-starts the cluster on every boot. Just start the EC2 instance (console/CLI/SSM: `aws ec2 start-instances --instance-ids <id>`) and wait a few minutes; no need to SSM in and run `minikube start` by hand. This only applies to an existing instance being stopped/started — a full `terragrunt apply` that replaces the instance (e.g. after a `user_data` change, since `user_data` isn't in `lifecycle.ignore_changes`) still goes through the full ~15-20 min first-boot flow above.
 
