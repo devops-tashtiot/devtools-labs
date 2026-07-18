@@ -97,6 +97,14 @@ module "karpenter" {
   namespace                       = "kube-system"
   service_account                 = "karpenter"
 
+  # Pinned to a fixed, predictable name (not left to auto-generate) so the
+  # GitOps chart (clusters-provision/clusters/karpenter's EC2NodeClass) can
+  # reference the exact same literal string from the start — nothing to look
+  # up from `terragrunt output` and copy in after apply.
+  node_iam_role_name            = "${var.cluster_name}-karpenter-node"
+  node_iam_role_use_name_prefix = false
+  queue_name                    = "${var.cluster_name}-karpenter-interruption"
+
   node_iam_role_additional_policies = {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   }

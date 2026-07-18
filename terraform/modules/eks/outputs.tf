@@ -20,12 +20,12 @@ output "subnet_ids" {
 
 output "karpenter_node_iam_role_name" {
   value       = module.karpenter.node_iam_role_name
-  description = "Set as the `role:` field on the EC2NodeClass manifest once it lands in clusters-provision/clusters/karpenter (GitOps, not Terraform)."
+  description = "Pinned to a fixed <cluster_name>-karpenter-node name (not auto-generated) — clusters-definition/clusters/karpenter/values.yaml already hardcodes this same literal string, nothing to copy from this output. Kept for reference/debugging only."
 }
 
 output "karpenter_interruption_queue_name" {
   value       = module.karpenter.queue_name
-  description = "SQS queue for Spot interruption/rebalance notices (enable_spot_termination defaults to true in module.karpenter) — set as settings.interruptionQueue in clusters-definition/clusters/karpenter/values.yaml so Karpenter drains nodes gracefully ahead of an actual Spot reclaim, instead of an abrupt kill."
+  description = "Pinned to a fixed <cluster_name>-karpenter-interruption name (not auto-generated) — clusters-definition/clusters/karpenter/values.yaml already hardcodes this same literal string, nothing to copy from this output. Kept for reference/debugging only."
 }
 
 output "karpenter_pod_identity_association_arn" {
