@@ -48,6 +48,17 @@ module "eks" {
         role_arn        = aws_iam_role.ebs_csi.arn
         service_account = "ebs-csi-controller-sa"
       }]
+      # Pins the controller Deployment (not the per-node DaemonSet part,
+      # which has to run everywhere) onto the same stable system node group
+      # as Karpenter's own controller — otherwise it could land on a
+      # Karpenter-managed Spot node and get disrupted by consolidation.
+      configuration_values = jsonencode({
+        controller = {
+          nodeSelector = {
+            "devtools/role" = "system-critical"
+          }
+        }
+      })
     }
   }
 
