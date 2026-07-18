@@ -116,8 +116,15 @@ module "karpenter" {
   cluster_name = module.eks.cluster_name
 
   create_pod_identity_association = true
-  namespace                       = "kube-system"
-  service_account                 = "karpenter"
+  # Not "kube-system" — the clusters-provision ApplicationSet deploys every
+  # chart into a namespace matching its directory name ('{{path.basename}}'),
+  # so the karpenter chart actually lands in a namespace literally called
+  # "karpenter". Found this the hard way: the association was registered for
+  # kube-system while the pod ran in karpenter, so Pod Identity's exact
+  # namespace+ServiceAccount match never fired and the pod had no valid AWS
+  # credentials at all.
+  namespace       = "karpenter"
+  service_account = "karpenter"
 
   # The controller's default IAM policy exceeds AWS's 6,144-byte limit for a
   # standalone managed policy (hit this for real: "LimitExceeded: Cannot
