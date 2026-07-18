@@ -56,10 +56,9 @@ module "eks" {
     }
     eks-pod-identity-agent = {}
     aws-ebs-csi-driver = {
-      pod_identity_association = [{
-        role_arn        = aws_iam_role.ebs_csi.arn
-        service_account = "ebs-csi-controller-sa"
-      }]
+      # No pod_identity_association block here — aws_eks_pod_identity_association.ebs_csi
+      # (iam.tf) already creates this exact association. Declaring it again
+      # here too caused a real 409 ResourceInUseException on first apply.
       # Pins the controller Deployment (not the per-node DaemonSet part,
       # which has to run everywhere) onto the same stable system node group
       # as Karpenter's own controller — otherwise it could land on a
