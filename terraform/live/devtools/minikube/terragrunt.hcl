@@ -7,7 +7,7 @@ include "root" {
 }
 
 inputs = {
-  instance_name  = "minikube-devtools"
+  instance_name = "minikube-devtools"
   # Verified via live RunInstances tests (both Spot and On-Demand) before
   # changing this: Spot capacity for anything above t3/t3a is currently
   # depleted in both il-central-1a and il-central-1b (the only two AZs this
@@ -16,7 +16,7 @@ inputs = {
   # in il-central-1a (the only AZ available to us — the data EBS volume is
   # AZ-locked there) tested successfully, so this instance is On-Demand
   # (see enable_spot below) until Spot capacity frees up at this size.
-  instance_type  = "m6i.4xlarge"
+  instance_type    = "m6i.4xlarge"
   root_volume_size = 50
   data_volume_size = 60
 

@@ -10,11 +10,15 @@ terraform/
 ├── live/devtools/
 │   ├── minikube/                # terragrunt.hcl — standalone EC2 instance
 │   ├── rds/                     # terragrunt.hcl — standalone RDS instance
-│   └── domain-controller/       # terragrunt.hcl — standalone Windows AD EC2 instance
+│   ├── domain-controller/       # terragrunt.hcl — standalone Windows AD EC2 instance
+│   ├── cloudflare/              # terragrunt.hcl — Cloudflare zone + DNS records
+│   └── devtools-secrets/        # terragrunt.hcl — platform-wide SSM secrets not tied to any other unit
 └── modules/
     ├── minikube/                # EC2 user_data: start minikube + ArgoCD + app-of-apps only
-    ├── rds/                     # Postgres RDS instance + security group
-    └── domain-controller/       # Windows Server 2022 EC2 + AD forest bootstrap
+    ├── rds/                     # Postgres RDS instance + security group; publishes admin creds to SSM
+    ├── domain-controller/       # Windows Server 2022 EC2 + AD forest bootstrap; publishes admin/LDAP-bind creds to SSM
+    ├── cloudflare/              # cloudflare_zone + cloudflare_dns_record + Access app; read-only tunnel lookup; Origin CA cert managed + published to SSM
+    └── devtools-secrets/        # aws_ssm_parameter for /devtools/admin/password + /devtools/rhbk/oidc-client-secret
 ```
 
 The Packer template for the minikube module's golden AMI (Docker/kubectl/Helm/minikube
@@ -23,13 +27,13 @@ pre-installed) lives in its own repo:
 
 **minikube module scope is intentionally minimal** — it bootstraps ArgoCD plus two app-of-apps Applications, `clusters-applicationset` then `devtools-applicationset` in that order (see "What the Modules Provision" below), and nothing else. `nginx-ingress`, `cloudflared`, `external-secrets-operator`, and the ArgoCD `Ingress` are **not** provisioned by Terraform; they're GitOps-managed via `clusters-provision`/`clusters-definition` (plus an `ingress` block in the `argocd` devtool) that ArgoCD deploys itself once it's up.
 
-## Three independent units — not a dependency chain
+## Five independent units — not a dependency chain
 
-`minikube`, `rds`, and `domain-controller` are three separate Terragrunt units under `terraform/live/devtools`, and **none of them has a `dependency` block on either of the others**. Each resolves its own VPC/subnets independently (by data lookup or hardcoded tag filter, not by reading another unit's outputs), so:
+`minikube`, `rds`, `domain-controller`, `cloudflare`, and `devtools-secrets` are five separate Terragrunt units under `terraform/live/devtools`, and **none of them has a `dependency` block on any of the others**. Each resolves its own resources independently, so:
 
-- Any one of them can be applied, destroyed, or torn down and rebuilt without touching the other two.
-- `terragrunt run-all apply`/`destroy` from `terraform/live/devtools` runs all three **in parallel** — there's no ordering to wait on.
-- They happen to share the same VPC (`vpc-0c5eaad2eb2976b41`) and similar spoke-subnet tag filters by convention, not by Terraform reference.
+- Any one of them can be applied, destroyed, or torn down and rebuilt without touching the others.
+- `terragrunt run-all apply`/`destroy` from `terraform/live/devtools` runs all five **in parallel** — there's no ordering to wait on.
+- `minikube`, `rds`, and `domain-controller` happen to share the same VPC (`vpc-0c5eaad2eb2976b41`) and similar spoke-subnet tag filters by convention, not by Terraform reference. `cloudflare` doesn't touch AWS at all — different provider, different account entirely. `devtools-secrets` is pure SSM with no dependency on anything else it publishes alongside. All independent by construction, not just by convention.
 
 ## Five-Repo GitOps Architecture
 
@@ -81,18 +85,24 @@ aws ssm put-parameter \
 ```
 The path must match `tunnelCredentialsSsmParameter` in `devtools-definition/devtools/cloudflared/values.yaml`, and fall under the `arn:aws:ssm:*:*:parameter/devtools/*` prefix the minikube instance role is allowed to read.
 
-**Cloudflare DNS CNAME** — each subdomain must point to `7de872ce-2826-42fb-9aea-325e10e3e5fc.cfargotunnel.com` (see parent `CLAUDE.md` for the API call).
+**Cloudflare Origin CA certificate in SSM Parameter Store** — two `SecureString`s, `/devtools/cloudflare/origin-cert-crt` and `/devtools/cloudflare/origin-cert-key` (already populated), consumed by `clusters-provision/clusters/ingress-nginx`'s `origin-cert-secret.yaml` so `cloudflared` can connect to nginx-ingress over real HTTPS instead of plain HTTP (see `clusters-provision/clusters/cloudflared/values.yaml` for why that matters). The private key was generated locally (never sent to Cloudflare — only a CSR derived from it was), so there's no `put-parameter` rotation snippet here the way there is for tunnel credentials; regenerate both via a fresh CSR/cert if the key is ever compromised.
+
+`terraform/live/devtools/cloudflare` looks up this cert (and the tunnel) read-only for visibility, via `origin_ca_certificate_id`/`tunnel_id` inputs — see that module's `main.tf` for why it's a `data` source lookup and not a managed `resource`. To find the cert ID for that input:
+```bash
+curl -s "https://api.cloudflare.com/client/v4/certificates?zone_id=148024e9103dc1676dc7bf81d9363603" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result[] | {id, hostnames, expires_on}'
+```
+(Origin CA endpoints sometimes require the account's dedicated Origin CA Key — `X-Auth-User-Service-Key` header — instead of a scoped API token; if the above 403s, that's why.)
+
+**Cloudflare DNS CNAME** — each subdomain must point to `7de872ce-2826-42fb-9aea-325e10e3e5fc.cfargotunnel.com`. Managed via Terraform now — see the `dns_records` map in `terraform/live/devtools/cloudflare/terragrunt.hcl` (the parent `CLAUDE.md`'s curl steps are the old manual fallback only).
 
 **The minikube base AMI must exist** — the `minikube` module looks up the most recent AMI matching `minikube-devtools-base-*` (owned by this account) via `data.aws_ami.minikube_base`. If none exists yet (fresh account), build one first — see below.
 
-**domain-controller's admin/LDAP-bind credentials in SSM Parameter Store** — four `SecureString`s the `ad-bootstrap.ps1.tftpl` user-data script fetches at boot instead of baking into user-data or Terraform state: `/devtools/domain-controller/admin-username`, `/devtools/domain-controller/admin-password` (DSRM/local Administrator), and `/devtools/domain-controller/ldap-bind-username`, `/devtools/domain-controller/ldap-bind-password` (the `svc-devops-tashtiot` service account Bitbucket/RHBK bind to LDAP with — `clusters-definition/clusters/rhbk/values.yaml` points at these same two paths, so RHBK and the domain controller never share a literal credential value in git). Populate all four before applying, e.g.:
-```bash
-aws ssm put-parameter --name /devtools/domain-controller/admin-username --type SecureString --value "Administrator" --profile 342831714456_Workload-Admin-PS --region il-central-1
-aws ssm put-parameter --name /devtools/domain-controller/admin-password --type SecureString --value "<password>" --profile 342831714456_Workload-Admin-PS --region il-central-1
-aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-username --type SecureString --value "svc-devops-tashtiot" --profile 342831714456_Workload-Admin-PS --region il-central-1
-aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-password --type SecureString --value "<password>" --profile 342831714456_Workload-Admin-PS --region il-central-1
-```
-Until these exist, `terragrunt apply` still succeeds (the instance boots) but `ad-bootstrap.ps1.tftpl` fails to fetch them and forest promotion/LDAP object creation never completes. Note `/devtools/domain-controller/ldap-connection-url` is *not* a prerequisite — the module writes that one itself on every apply (see "domain-controller module" above).
+**domain-controller's admin/LDAP-bind credentials in SSM Parameter Store** — four `SecureString`s the `ad-bootstrap.ps1.tftpl` user-data script fetches at boot: `/devtools/domain-controller/admin-username`, `/devtools/domain-controller/admin-password` (DSRM/local Administrator), and `/devtools/domain-controller/ldap-bind-username`, `/devtools/domain-controller/ldap-bind-password` (the `svc-devops-tashtiot` service account Bitbucket/RHBK bind to LDAP with — `clusters-definition/clusters/rhbk/values.yaml` points at these same two paths, so RHBK and the domain controller never share a literal credential value in git). These are no longer a manual prerequisite — the `domain-controller` module writes all four itself on every apply (`aws_ssm_parameter.admin_username/admin_password/ldap_bind_username/ldap_bind_password`, gated on `instance_enabled`), same as `ldap-connection-url` already was. `admin_username` is plain text, set explicitly in `terraform/live/devtools/domain-controller/terragrunt.hcl`; `admin_password` and `ldap_bind_password` are sensitive with no default, so `terragrunt apply` prompts for them interactively every run (export `TF_VAR_admin_password`/`TF_VAR_ldap_bind_password` to avoid retyping them). `ldap_bind_username` isn't a separate prompt — it's published from `ad_group_member_username`, which must stay in sync with the account `ad-bootstrap.ps1.tftpl` creates from the SSM value (see that resource's comment in `main.tf`).
+
+**Shared devtools secrets in SSM Parameter Store** (`terraform/live/devtools/devtools-secrets`, module `devtools-secrets`) — two `SecureString`s not tied to any other unit: `/devtools/admin/password` (the one shared initial admin password every devtool on the platform uses, see `devtools-provision/README.md`) and `/devtools/rhbk/oidc-client-secret` (the shared OIDC client secret RHBK issues to every devtool that federates SSO through it). `admin_password` is sensitive with no default — prompts interactively on every `terragrunt apply` (export `TF_VAR_admin_password` to avoid retyping it). `rhbk_oidc_client_secret` has no variable at all: it's generated by Terraform itself (`random_password`), since it's an opaque shared secret with no reason for a human to invent one.
+
+**rds's master DB credentials in SSM Parameter Store** — the `rds` module publishes `db_username`/`db_password` to `/devtools/rds/admin-username` and `/devtools/rds/admin-password` itself (`aws_ssm_parameter.admin_username`/`admin_password`), which devtool init containers read to provision their own per-tool databases/roles (see `devtools-definition/*/values.yaml`'s `rds.usernameSsmParameter`/`passwordSsmParameter`). `db_username` is plain text, set explicitly in `terraform/live/devtools/rds/terragrunt.hcl`; `db_password` is sensitive with no default, so `terragrunt apply` prompts for it interactively every run (export `TF_VAR_db_password` to avoid retyping it) — it is **not** a hardcoded value in git.
 
 ## Building the Minikube base AMI
 
@@ -140,9 +150,9 @@ terragrunt apply   # ~15-20 min; installs Minikube + ArgoCD, then ArgoCD deploys
 
 **Restarting after the nightly auto-stop (or any EC2 stop/start):** nothing manual is needed — `minikube.service` (installed by `user_data`, see "What the Modules Provision" → minikube module) auto-starts the cluster on every boot. Just start the EC2 instance (console/CLI/SSM: `aws ec2 start-instances --instance-ids <id>`) and wait a few minutes; no need to SSM in and run `minikube start` by hand. This only applies to an existing instance being stopped/started — a full `terragrunt apply` that replaces the instance (e.g. after a `user_data` change, since `user_data` isn't in `lifecycle.ignore_changes`) still goes through the full ~15-20 min first-boot flow above.
 
-### Applying all three units together
+### Applying all five units together
 
-`terraform/live/devtools` has only these three units, so a plain `terragrunt run-all` from that directory applies/destroys all of them — no scoping needed. Since none of the three depends on another, they run in parallel.
+`terraform/live/devtools` has only these five units, so a plain `terragrunt run-all` from that directory applies/destroys all of them — no scoping needed. Since none of the five depends on another, they run in parallel. Note that `terragrunt run-all apply` will prompt interactively, in whatever order the units happen to run, for every sensitive variable with no default across all five units (rds's db_password, domain-controller's admin_password and ldap_bind_password, devtools-secrets' admin_password) — export the matching `TF_VAR_*` env vars first if you want to avoid juggling multiple simultaneous prompts. rhbk_oidc_client_secret is the one exception: it's Terraform-generated (`random_password`), not prompted.
 
 ```bash
 cd terraform/live/devtools
@@ -155,7 +165,7 @@ terragrunt run-all destroy
 
 ## Adding a New Service
 
-1. Add a Cloudflare DNS CNAME for `mytool.devopstashtiot.page` (parent `CLAUDE.md`).
+1. Add an entry to the `dns_records` map in `terraform/live/devtools/cloudflare/terragrunt.hcl` for `mytool.devopstashtiot.page` and `terragrunt apply` that unit.
 2. Deploy the service to the cluster.
 3. Apply a Kubernetes `Ingress`:
    ```yaml
@@ -196,6 +206,6 @@ kubectl get pods -n kube-system | grep -E "nginx|cloudflared"
 - **No AWS load balancer** — `cloudflared` dials out to Cloudflare; `nginx-ingress` is ClusterIP. Zero LB cost.
 - **ArgoCD runs insecure** (`--insecure` flag) — TLS is terminated at Cloudflare; acceptable for a dev platform
 - **Two-source ApplicationSet** — the provision repo owns chart structure; the definition repo owns env-specific values, keeping configuration separate from packaging
-- **Three independent Terragrunt units, no dependency graph** — `minikube`, `rds`, and `domain-controller` each resolve their own VPC/subnets rather than reading another unit's outputs, so any one can be applied/destroyed independently of the others (see "Three independent units" above)
+- **Four independent Terragrunt units, no dependency graph** — `minikube`, `rds`, `domain-controller`, and `cloudflare` each resolve their own resources rather than reading another unit's outputs, so any one can be applied/destroyed independently of the others (see "Four independent units" above)
 - **minikube instance boots from a custom AMI, not stock Amazon Linux** — the instance is torn down and recreated often; baking Docker/kubectl/Helm/minikube into a golden AMI (built via Packer, see "Building the Minikube base AMI") removes several flaky external downloads from the boot-time critical path, leaving `user_data` with only the fast, instance-specific steps
 - **Route53 is unusable in this account** — the Horizon LZ org-wide SCP has an explicit deny on `route53:CreateHostedZone` (hit while building domain-controller's LDAP DNS name, see "domain-controller module" above). Anything needing stable internal service discovery in this account has to use an SSM-parameter-published value (or similar) instead of a private hosted zone

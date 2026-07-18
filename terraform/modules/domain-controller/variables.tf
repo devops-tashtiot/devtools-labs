@@ -76,10 +76,21 @@ variable "admin_username_ssm_parameter" {
   default     = "/devtools/domain-controller/admin-username"
 }
 
+variable "admin_username" {
+  description = "Local Administrator / DSRM restore-mode username, published to admin_username_ssm_parameter. Not a secret — required with no default; set the literal value explicitly in the live terragrunt.hcl."
+  type        = string
+}
+
 variable "admin_password_ssm_parameter" {
   description = "SSM Parameter Store path (SecureString) holding the Directory Services Restore Mode (DSRM) / local Administrator password, set during forest promotion. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data."
   type        = string
   default     = "/devtools/domain-controller/admin-password"
+}
+
+variable "admin_password" {
+  description = "Matching DSRM/local Administrator password, published to admin_password_ssm_parameter. No default — Terraform prompts for it interactively on apply if not supplied via TF_VAR_admin_password or a tfvars file."
+  type        = string
+  sensitive   = true
 }
 
 variable "ou_name" {
@@ -92,6 +103,12 @@ variable "ldap_bind_username_ssm_parameter" {
   description = "SSM Parameter Store path (SecureString) holding the sAMAccountName for the read-only service account Bitbucket/RHBK use to bind to LDAP. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data."
   type        = string
   default     = "/devtools/domain-controller/ldap-bind-username"
+}
+
+variable "ldap_bind_password" {
+  description = "Password for the LDAP bind service account, published to ldap_bind_password_ssm_parameter. No default — Terraform prompts for it interactively on apply if not supplied via TF_VAR_ldap_bind_password or a tfvars file. Must satisfy AD's default domain password complexity policy (this module doesn't relax it): mixed case + digit or symbol, 7+ characters."
+  type        = string
+  sensitive   = true
 }
 
 variable "ldap_bind_password_ssm_parameter" {

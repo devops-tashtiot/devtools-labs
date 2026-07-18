@@ -55,51 +55,41 @@ re-promotion.
 
 ## SSM parameters — the actual source of every credential
 
-Four parameters are **prerequisites you must populate yourself** before the first `apply`
-— `ad-bootstrap.ps1.tftpl` fetches them live at boot via `Get-SSMParameter -WithDecryption`,
-they are never baked into `user_data` or Terraform state:
+Terraform writes all five parameters itself (`aws_ssm_parameter.admin_username`/`admin_password`/
+`ldap_bind_username`/`ldap_bind_password`/`ldap_connection_url` in `main.tf`, all gated on
+`instance_enabled`) — there's no manual `aws ssm put-parameter` prerequisite anymore.
+`ad-bootstrap.ps1.tftpl` fetches the first four live at boot via `Get-SSMParameter -WithDecryption`
+(never baked into `user_data` or plaintext in Terraform state beyond the SSM value itself):
 
 | SSM parameter (default path) | Type | What it's for | Where the value comes from |
 |---|---|---|---|
-| `/devtools/domain-controller/admin-username` | `SecureString` | Local Administrator / DSRM restore-mode username used by `Install-ADDSForest` | You choose it — conventionally `Administrator` |
-| `/devtools/domain-controller/admin-password` | `SecureString` | Matching DSRM/local Administrator password | You choose it — also usable for RDP if you later configure a key pair |
-| `/devtools/domain-controller/ldap-bind-username` | `SecureString` | sAMAccountName of the read-only LDAP bind account `New-LdapBindAccount` creates | You choose it (e.g. `svc-devops-tashtiot`) — **must match `ad_group_member_username` above** |
-| `/devtools/domain-controller/ldap-bind-password` | `SecureString` | Password for that bind account | You choose it — must satisfy AD's default domain password complexity policy (this module doesn't relax it): mixed case + digit or symbol, 7+ characters |
+| `/devtools/domain-controller/admin-username` | `SecureString` | Local Administrator / DSRM restore-mode username used by `Install-ADDSForest` | `var.admin_username` — plain text, not sensitive; set explicitly in the live `terragrunt.hcl` (conventionally `"Administrator"`) |
+| `/devtools/domain-controller/admin-password` | `SecureString` | Matching DSRM/local Administrator password | `var.admin_password` — sensitive, no default, so `terragrunt apply` prompts for it interactively every run (export `TF_VAR_admin_password` to avoid retyping it) |
+| `/devtools/domain-controller/ldap-bind-username` | `SecureString` | sAMAccountName of the read-only LDAP bind account `New-LdapBindAccount` creates | `var.ad_group_member_username` (reused, not a separate variable) — **must** be the same literal value used to create the account and to add it to `ad_group_name`, or the two diverge |
+| `/devtools/domain-controller/ldap-bind-password` | `SecureString` | Password for that bind account | `var.ldap_bind_password` — sensitive, no default, prompts interactively every run (export `TF_VAR_ldap_bind_password`); must satisfy AD's default domain password complexity policy (this module doesn't relax it): mixed case + digit or symbol, 7+ characters |
+| `/devtools/domain-controller/ldap-connection-url` | `SecureString` | `ldap://<current-private-ip>:389`, consumed by `clusters-definition/clusters/rhbk/values.yaml`'s `ldap.connectionUrlSsmParameter` | Computed by Terraform itself from `aws_instance.windows[0].private_ip` on every apply — never set this one manually |
 
-Populate them once, before the first apply:
+`ldap-connection-url` exists because a private Route53 zone (the natural way to give the
+instance a stable DNS name) isn't available — Horizon LZ's org-wide SCP has an explicit deny
+on `route53:CreateHostedZone` — so consumers read the current private IP from SSM instead of
+a value that would go stale the moment this instance is replaced.
 
-```bash
-aws ssm put-parameter --name /devtools/domain-controller/admin-username --type SecureString --value "Administrator" --profile 342831714456_Workload-Admin-PS --region il-central-1
-aws ssm put-parameter --name /devtools/domain-controller/admin-password --type SecureString --value "<password>" --profile 342831714456_Workload-Admin-PS --region il-central-1
-aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-username --type SecureString --value "svc-devops-tashtiot" --profile 342831714456_Workload-Admin-PS --region il-central-1
-aws ssm put-parameter --name /devtools/domain-controller/ldap-bind-password --type SecureString --value "<password>" --profile 342831714456_Workload-Admin-PS --region il-central-1
-```
-
-Until all four exist, `terragrunt apply` still succeeds (the instance boots), but
-`ad-bootstrap.ps1.tftpl` fails to fetch them and forest promotion / LDAP object creation
-never completes — check `C:\ad-bootstrap.log` on the instance (see "Access" below).
-
-One more parameter is the **opposite direction** — Terraform *writes* it, don't set it yourself:
-
-| SSM parameter | Type | Written by | Consumed by |
-|---|---|---|---|
-| `/devtools/domain-controller/ldap-connection-url` | `SecureString` | `aws_ssm_parameter.ldap_connection_url` in `main.tf`, on every `apply`, as `ldap://<current-private-ip>:389` | `clusters-definition/clusters/rhbk/values.yaml`'s `ldap.connectionUrlSsmParameter` |
-
-This exists because a private Route53 zone (the natural way to give the instance a stable
-DNS name) isn't available — Horizon LZ's org-wide SCP has an explicit deny on
-`route53:CreateHostedZone` — so consumers read the current private IP from SSM instead of a
-value that would go stale the moment this instance is replaced.
+If `admin_password`/`ldap_bind_password` aren't supplied (interactively or via `TF_VAR_*`),
+`terragrunt apply` still succeeds (the instance boots), but `ad-bootstrap.ps1.tftpl` fails to
+fetch valid values and forest promotion / LDAP object creation never completes — check
+`C:\ad-bootstrap.log` on the instance (see "Access" below).
 
 ## First-time setup order
 
-1. Populate the four prerequisite SSM parameters above.
-2. `cd terraform/live/devtools/domain-controller && terragrunt apply`.
-3. The instance boots, installs the `AD-Domain-Services` feature, then calls
+1. `cd terraform/live/devtools/domain-controller && terragrunt apply` — prompts interactively
+   for `admin_password` and `ldap_bind_password` (or export `TF_VAR_admin_password`/
+   `TF_VAR_ldap_bind_password` beforehand to skip the prompts).
+2. The instance boots, installs the `AD-Domain-Services` feature, then calls
    `Install-ADDSForest`, which reboots the instance itself once promotion finishes.
-4. On the boot right after that reboot, `NTDS` (the AD DS service) is present, so the script's
+3. On the boot right after that reboot, `NTDS` (the AD DS service) is present, so the script's
    `Test-DomainControllerReady` check now passes and it runs `Initialize-BitbucketLdapObjects`
    in that same boot — creating the OU, the LDAP bind account, the sample user, and the group.
-5. Confirm via SSM (see "Access" below), or just wait for RHBK/Bitbucket's own LDAP bind to
+4. Confirm via SSM (see "Access" below), or just wait for RHBK/Bitbucket's own LDAP bind to
    start succeeding.
 
 ## Access

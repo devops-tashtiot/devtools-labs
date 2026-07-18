@@ -1,3 +1,11 @@
+locals {
+  ssm_tags = {
+    Repo      = "devtools-labs"
+    Module    = "terraform/modules/rds"
+    ManagedBy = "GitOps"
+  }
+}
+
 resource "aws_db_subnet_group" "this" {
   name       = "${var.identifier}-subnet-group"
   subnet_ids = data.aws_subnets.target.ids
@@ -69,4 +77,20 @@ resource "aws_db_instance" "this" {
   tags = {
     Name = var.identifier
   }
+}
+
+resource "aws_ssm_parameter" "admin_username" {
+  name        = var.admin_username_ssm_parameter
+  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/rds). Do not edit manually; changes will be reverted on the next apply. RDS master DB username, consumed by devtool init containers (see devtools-definition/*/values.yaml's rds.usernameSsmParameter) to provision their own per-tool databases/roles."
+  type        = "SecureString"
+  value       = var.db_username
+  tags        = local.ssm_tags
+}
+
+resource "aws_ssm_parameter" "admin_password" {
+  name        = var.admin_password_ssm_parameter
+  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/rds). Do not edit manually; changes will be reverted on the next apply. RDS master DB password, consumed by devtool init containers (see devtools-definition/*/values.yaml's rds.passwordSsmParameter) to provision their own per-tool databases/roles."
+  type        = "SecureString"
+  value       = var.db_password
+  tags        = local.ssm_tags
 }

@@ -33,9 +33,21 @@ variable "db_username" {
 }
 
 variable "db_password" {
-  description = "Master DB password"
+  description = "Master DB password. No default — Terraform prompts for it interactively on apply if not supplied via TF_VAR_db_password or a tfvars file."
   type        = string
   sensitive   = true
+}
+
+variable "admin_username_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) to publish db_username to"
+  type        = string
+  default     = "/devtools/rds/admin-username"
+}
+
+variable "admin_password_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) to publish db_password to"
+  type        = string
+  default     = "/devtools/rds/admin-password"
 }
 
 variable "postgres_version" {
