@@ -40,8 +40,20 @@ module "eks" {
       # Terraform — a managed addon's own ConfigMap gets reconciled/reverted
       # on every addon version bump, so it can't be edited directly here.
     }
-    vpc-cni                = {}
-    kube-proxy             = {}
+    # before_compute = true: these two must exist before the node group
+    # finishes creating — the module's aws_eks_addon.this (the default,
+    # non-before_compute path) explicitly depends_on the node groups, but a
+    # node only reports Ready once its CNI plugin is running, and
+    # aws_eks_node_group's own create call polls until nodes are Ready. Left
+    # at defaults, that's a real deadlock: node group waits on Ready, Ready
+    # waits on vpc-cni, vpc-cni waits on the node group finishing. kube-proxy
+    # is bundled in for the same reason (also expected pre-node-join).
+    vpc-cni = {
+      before_compute = true
+    }
+    kube-proxy = {
+      before_compute = true
+    }
     eks-pod-identity-agent = {}
     aws-ebs-csi-driver = {
       pod_identity_association = [{
@@ -107,6 +119,12 @@ module "karpenter" {
   create_pod_identity_association = true
   namespace                       = "kube-system"
   service_account                 = "karpenter"
+
+  # The controller's default IAM policy exceeds AWS's 6,144-byte limit for a
+  # standalone managed policy (hit this for real: "LimitExceeded: Cannot
+  # exceed quota for PolicySize: 6144"). enable_inline_policy switches it to
+  # an inline role policy instead, which has a larger 10,240-byte limit.
+  enable_inline_policy = true
 
   # Pinned to a fixed, predictable name (not left to auto-generate) so the
   # GitOps chart (clusters-provision/clusters/karpenter's EC2NodeClass) can
