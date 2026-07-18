@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://devops-tashtiot.github.io/devtools-labs/</loc>
+         <lastmod>2026-07-18</lastmod>
+    </url>
+    <url>
+         <loc>https://devops-tashtiot.github.io/devtools-labs/bootstrap/</loc>
+         <lastmod>2026-07-18</lastmod>
+    </url>
+    <url>
+         <loc>https://devops-tashtiot.github.io/devtools-labs/post-devtools-implementation/argocd/</loc>
+         <lastmod>2026-07-18</lastmod>
+    </url>
+    <url>
+         <loc>https://devops-tashtiot.github.io/devtools-labs/post-devtools-implementation/artifactory/</loc>
+         <lastmod>2026-07-18</lastmod>
+    </url>
+    <url>
+         <loc>https://devops-tashtiot.github.io/devtools-labs/post-devtools-implementation/bitbucket/</loc>
+         <lastmod>2026-07-18</lastmod>
+    </url>
+    <url>
+         <loc>https://devops-tashtiot.github.io/devtools-labs/post-devtools-implementation/confluence/</loc>
+         <lastmod>2026-07-18</lastmod>
+    </url>
+    <url>
+         <loc>https://devops-tashtiot.github.io/devtools-labs/post-devtools-implementation/jira/</loc>
+         <lastmod>2026-07-18</lastmod>
+    </url>
+</urlset>
