@@ -16,6 +16,18 @@ variable "rhbk_oidc_client_secret_ssm_parameter" {
   default     = "/devtools/rhbk/oidc-client-secret"
 }
 
+variable "cloudflare_origin_ca_root_cert_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) to publish cloudflare_origin_ca_root_cert to"
+  type        = string
+  default     = "/devtools/cloudflare/origin-ca-root-cert"
+}
+
+variable "cloudflare_origin_ca_root_cert" {
+  description = "Cloudflare's public Origin CA root certificate (PEM). Static and publicly-published by Cloudflare — the same value for every Cloudflare customer, not generated per-account (contrast with the cloudflare module's origin_cert_crt/key, which ARE this zone's own Terraform-generated leaf cert). Leave unset (default) to use the copy committed in files/ — see local.cloudflare_origin_ca_root_cert in main.tf (variable defaults can't call file())."
+  type        = string
+  default     = ""
+}
+
 variable "aws_region" {
   type    = string
   default = ""
