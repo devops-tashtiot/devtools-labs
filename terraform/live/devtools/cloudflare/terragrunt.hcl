@@ -96,6 +96,11 @@ inputs = {
       type    = "CNAME"
       content = local.tunnel_target
     }
+    woodpecker = {
+      name    = "woodpecker.devopstashtiot.page"
+      type    = "CNAME"
+      content = local.tunnel_target
+    }
     xray = {
       name    = "xray.devopstashtiot.page"
       type    = "CNAME"
@@ -133,7 +138,20 @@ inputs = {
   # SSL/TLS > Origin Server (see clusters-provision/ingress-nginx's
   # origin-cert-secret.yaml, which consumes the same two SSM paths below via
   # ExternalSecret and picks up the new cert on its next 1h refresh).
-  origin_cert_hostnames         = ["devopstashtiot.page", "*.devopstashtiot.page"]
+  # *.argocd.devopstashtiot.page added 2026-07-21 — the per-consumer ArgoCD wildcard
+  # (app/v1/argocd/CLAUDE.md, _build_argocd()) routes straight to argocd-server in-cluster and
+  # needs its own Ingress + real TLS to avoid a plaintext downgrade; *.devopstashtiot.page alone
+  # doesn't cover a two-level subdomain like netanel.argocd.devopstashtiot.page.
+  # *.woodpecker.devopstashtiot.page and *.sonarqube.devopstashtiot.page added the same day,
+  # same reasoning, ahead of equivalent per-instance/per-consumer wildcard routing for those
+  # two tools.
+  origin_cert_hostnames = [
+    "devopstashtiot.page",
+    "*.devopstashtiot.page",
+    "*.argocd.devopstashtiot.page",
+    "*.woodpecker.devopstashtiot.page",
+    "*.sonarqube.devopstashtiot.page",
+  ]
   origin_cert_crt_ssm_parameter = "/devtools/cloudflare/origin-cert-crt"
   origin_cert_key_ssm_parameter = "/devtools/cloudflare/origin-cert-key"
 }

@@ -83,7 +83,7 @@ locals {
 
     echo "=== [3/6] Configuring CoreDNS rewrites for in-cluster *.devopstashtiot.page routing ==="
     # Every *.devopstashtiot.page hostname devtools call each other on (Bitbucket, Confluence,
-    # Jira, SonarQube, Artifactory, ArgoCD, RHBK) needs to resolve, for any caller running
+    # Jira, SonarQube, Artifactory, ArgoCD, RHBK, Woodpecker) needs to resolve, for any caller running
     # inside the cluster, straight to ingress-nginx-controller's ClusterIP instead of going out
     # through real Cloudflare DNS — Cloudflare Access sits in front of the whole domain and
     # blocks any non-browser (programmatic) request with its email-OTP wall, which a pod like
@@ -123,6 +123,7 @@ data:
         rewrite name exact sonarqube.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
         rewrite name exact artifactory.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
         rewrite name exact rhbk.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
+        rewrite name exact woodpecker.devopstashtiot.page ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
         kubernetes cluster.local in-addr.arpa ip6.arpa {
            pods insecure
            fallthrough in-addr.arpa ip6.arpa
