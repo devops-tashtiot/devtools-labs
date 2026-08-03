@@ -55,3 +55,4 @@ nav:
       - Confluence: post-devtools-implementation/confluence/README.md
       - Bitbucket: post-devtools-implementation/bitbucket/README.md
       - ArgoCD: post-devtools-implementation/argocd/README.md
+      - Woodpecker: post-devtools-implementation/woodpecker/README.md

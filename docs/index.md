@@ -32,6 +32,7 @@ sibling `*-provision`/`*-definition` repos.
 | Configure Confluence's LDAP directory + SSO | [Post-deployment: Confluence](post-devtools-implementation/confluence/README.md) |
 | Configure Bitbucket's LDAP directory + SSO + API token | [Post-deployment: Bitbucket](post-devtools-implementation/bitbucket/README.md) |
 | Generate ArgoCD's API token for `devops-api` | [Post-deployment: ArgoCD](post-devtools-implementation/argocd/README.md) |
+| Register Woodpecker's Bitbucket Application Link (required for login) | [Post-deployment: Woodpecker](post-devtools-implementation/woodpecker/README.md) |
 
 For the full repo/module architecture, prerequisites, and design decisions,
 see `CLAUDE.md` at the repo root — these docs cover the *procedures*; that
