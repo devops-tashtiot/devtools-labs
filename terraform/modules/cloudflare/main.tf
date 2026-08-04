@@ -23,6 +23,39 @@ resource "cloudflare_dns_record" "this" {
   ttl     = each.value.ttl
 }
 
+# Lets a non-browser client (no interactive email-OTP flow possible) reach
+# any *.devopstashtiot.page hostname by sending CF-Access-Client-Id/
+# CF-Access-Client-Secret headers instead — e.g. GitHub Actions runners,
+# which are genuinely external (unlike an in-cluster caller such as
+# devops-api or Woodpecker, which bypass Access entirely via the CoreDNS
+# rewrites in devtools-labs/terraform/modules/minikube/main.tf and never
+# need this). Cloudflare only returns client_secret once, at creation —
+# published to SSM below, same as every other Cloudflare-issued credential
+# on this platform, rather than left only in Terraform state.
+resource "cloudflare_zero_trust_access_service_token" "github_actions" {
+  account_id = var.cloudflare_account_id
+  name       = var.github_actions_service_token_name
+  duration   = "8760h"
+}
+
+resource "aws_ssm_parameter" "github_actions_service_token_client_id" {
+  name        = var.github_actions_service_token_client_id_ssm_parameter
+  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Access service token client ID for GitHub Actions to reach *.devopstashtiot.page past the email-OTP wall."
+  type        = "SecureString"
+  value       = cloudflare_zero_trust_access_service_token.github_actions.client_id
+
+  tags = local.ssm_tags
+}
+
+resource "aws_ssm_parameter" "github_actions_service_token_client_secret" {
+  name        = var.github_actions_service_token_client_secret_ssm_parameter
+  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Access service token client secret for GitHub Actions to reach *.devopstashtiot.page past the email-OTP wall."
+  type        = "SecureString"
+  value       = cloudflare_zero_trust_access_service_token.github_actions.client_secret
+
+  tags = local.ssm_tags
+}
+
 resource "cloudflare_zero_trust_access_application" "this" {
   account_id = var.cloudflare_account_id
   name       = var.access_app_name
@@ -52,6 +85,20 @@ resource "cloudflare_zero_trust_access_application" "this" {
       precedence = 1
       include = [
         for email in var.allowed_emails : { email = { email = email } }
+      ]
+    },
+    # Second, independent policy — Access grants a request if ANY policy on
+    # the app matches, so this doesn't weaken the email-OTP policy above; it
+    # just adds a second, non-interactive way in for exactly this one
+    # service token. decision = "non_identity" is the policy type meant for
+    # service tokens specifically (no identity/email is ever established for
+    # these requests, unlike the "allow" policy above).
+    {
+      name       = "GitHub Actions Service Token"
+      decision   = "non_identity"
+      precedence = 2
+      include = [
+        { service_token = { token_id = cloudflare_zero_trust_access_service_token.github_actions.id } }
       ]
     }
   ]
@@ -97,15 +144,17 @@ resource "tls_cert_request" "origin_cert" {
 }
 
 # cloudflare_origin_ca_certificate's `hostnames` is ForceNew, and Cloudflare's
-# API always echoes wildcard entries before non-wildcard ones regardless of
-# the order submitted — so `hostnames` must be pre-sorted to match, or every
-# `plan` after the first would see a spurious order-only diff and recreate
-# the cert (and cascade into replacing tls_cert_request/tls_private_key too).
+# API always echoes the hostnames back in plain lexicographic order
+# regardless of the order submitted — so `hostnames` must be pre-sorted to
+# match, or every `plan` after the first would see a spurious order-only
+# diff and recreate the cert (and cascade into replacing
+# tls_cert_request/tls_private_key too). A plain `sort()` is sufficient (not
+# a wildcards-first-then-alphabetical split, which was tried first and still
+# drifted): `*` (0x2A) sorts before every letter in ASCII, so a full
+# lexicographic sort naturally puts every "*.foo" entry before any bare
+# "foo" entry anyway — exactly matching what Cloudflare returns.
 locals {
-  origin_cert_hostnames_sorted = concat(
-    [for h in var.origin_cert_hostnames : h if startswith(h, "*.")],
-    [for h in var.origin_cert_hostnames : h if !startswith(h, "*.")],
-  )
+  origin_cert_hostnames_sorted = sort(var.origin_cert_hostnames)
 }
 
 resource "cloudflare_origin_ca_certificate" "this" {

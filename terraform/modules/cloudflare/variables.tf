@@ -68,6 +68,24 @@ variable "origin_cert_validity_days" {
   default     = 5475
 }
 
+variable "github_actions_service_token_name" {
+  description = "Display name for the Cloudflare Access service token used by GitHub Actions"
+  type        = string
+  default     = "github-actions"
+}
+
+variable "github_actions_service_token_client_id_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) to publish the GitHub Actions service token's client ID to"
+  type        = string
+  default     = ""
+}
+
+variable "github_actions_service_token_client_secret_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) to publish the GitHub Actions service token's client secret to"
+  type        = string
+  default     = ""
+}
+
 variable "origin_cert_crt_ssm_parameter" {
   description = "SSM Parameter Store path (SecureString) to publish the issued certificate to"
   type        = string

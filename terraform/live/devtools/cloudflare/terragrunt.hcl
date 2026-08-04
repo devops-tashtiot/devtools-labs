@@ -101,6 +101,11 @@ inputs = {
       type    = "CNAME"
       content = local.tunnel_target
     }
+    woodpecker_wildcard = {
+      name    = "*.woodpecker.devopstashtiot.page"
+      type    = "CNAME"
+      content = local.tunnel_target
+    }
     xray = {
       name    = "xray.devopstashtiot.page"
       type    = "CNAME"
@@ -126,6 +131,15 @@ inputs = {
     "naama3434@gmail.com",
     "jonatan.netanel@gmail.com",
   ]
+
+  # Cloudflare Access service token for GitHub Actions — lets the
+  # GitHub<->Bitbucket repo mirror workflow (external to this cluster, so it
+  # can't use the CoreDNS-rewrite bypass in-cluster callers use) reach
+  # bitbucket.devopstashtiot.page without a human email-OTP login. See
+  # main.tf's github_actions service token + the second Access policy.
+  github_actions_service_token_name                         = "github-actions-repo-sync"
+  github_actions_service_token_client_id_ssm_parameter       = "/devtools/cloudflare/github-actions-service-token-client-id"
+  github_actions_service_token_client_secret_ssm_parameter   = "/devtools/cloudflare/github-actions-service-token-client-secret"
 
   # Read-only visibility into the tunnel that cloudflared already uses in
   # production — see main.tf for why this module looks it up via a `data`
