@@ -130,6 +130,7 @@ inputs = {
     "gulmanm@post.bgu.ac.il",
     "naama3434@gmail.com",
     "jonatan.netanel@gmail.com",
+    "amitorenshtein@gmail.com",
   ]
 
   # Cloudflare Access service token for GitHub Actions — lets the

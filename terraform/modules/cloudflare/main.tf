@@ -56,11 +56,33 @@ resource "aws_ssm_parameter" "github_actions_service_token_client_secret" {
   tags = local.ssm_tags
 }
 
+# The account's only other available login method is Cloudflare's own
+# built-in default IDP (type "cloudflare", restrict_to_account_members =
+# true) — it was never explicitly configured by anyone, Cloudflare just
+# falls back to it when no identity provider is set up, and it only lets in
+# people who are invited Members of this Cloudflare *account* (dashboard
+# access), not the external allowlisted emails below. This resource is what
+# actually enables the "enter your email -> receive a one-time code ->
+# enter it" flow documented in the parent CLAUDE.md, which was never true
+# until now.
+resource "cloudflare_zero_trust_access_identity_provider" "onetimepin" {
+  account_id = var.cloudflare_account_id
+  name       = "One-time PIN"
+  type       = "onetimepin"
+  config     = {}
+}
+
 resource "cloudflare_zero_trust_access_application" "this" {
   account_id = var.cloudflare_account_id
   name       = var.access_app_name
   domain     = var.access_app_domain
   type       = "self_hosted"
+
+  # Restricts login to the email-OTP provider above — without this, Access
+  # falls back to offering every enabled IDP on the account, including the
+  # account-members-only default that blocks every allowlisted email that
+  # isn't also a Cloudflare account Member.
+  allowed_idps = [cloudflare_zero_trust_access_identity_provider.onetimepin.id]
 
   session_duration          = "24h"
   app_launcher_visible      = true
