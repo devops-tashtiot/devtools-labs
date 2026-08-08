@@ -50,6 +50,15 @@ locals {
     mount --bind /mnt/minikube-data/docker /var/lib/docker
     systemctl start docker
 
+    # NOTE: making the node able to PULL images from Cloudflare-fronted registries
+    # (harbor, artifactory, ...) — trusting the Origin CA on the node and mapping
+    # those hosts to ingress-nginx's ClusterIP — is intentionally NOT done here.
+    # It lives in the GitOps-managed clusters/harbor-node-access DaemonSet, which
+    # self-heals across every 'minikube start' (the node's /etc/hosts is
+    # regenerated each start). See clusters-provision/clusters/harbor-node-access.
+    # (The CoreDNS rewrites in [3/6] handle the same routing for PODS; node-level
+    # image pulls bypass CoreDNS, which is why the DaemonSet exists.)
+
     echo "=== [2/6] Installing minikube.service so the cluster survives the nightly stop/manual-start cycle ==="
     # The nightly cost-saving stop (see schedule.tf) only stops the EC2 instance —
     # there is no matching auto-start, and even once someone starts it back up,
