@@ -68,14 +68,16 @@ Not GitOps-managed — rotate it the same way (manual `put-parameter`), same
 as Bitbucket's `/devtools/bitbucket/api-token` and ArgoCD's
 `/devtools/argocd/api-token`.
 
-> **Wiring status as of 2026-07-14:** this parameter exists and is
-> populated, and has been verified live (`Bearer <token>` against
-> `/access/api/v1/projects` on `artifactory-0` → `200`). `devops-api`'s
-> `app/v1/artifactory` module itself still authenticates with Basic auth
-> (`ARTIFACTORY_USERNAME`/`ARTIFACTORY_PASSWORD`, which also default to
-> placeholder dev values never overridden in
-> `devtools-definition/devtools/devops-api/values.yaml` — a second,
-> compounding bug) — the module's client construction needs reworking to
-> send `Authorization: Bearer` using this token instead before its routes
-> will actually work. See `devops-api/app/v1/artifactory/CLAUDE.md`'s
-> "Live-check findings" section for the full writeup.
+> **Wiring status as of 2026-08-16:** fully wired and verified live. The
+> parameter holds a fresh Identity Token (rotated 2026-08-16, the
+> 2026-07-14 one had gone stale), synced into `devops-api`'s
+> `devops-api-secrets` as `ARTIFACTORY_TOKEN` via
+> `devtools-definition/devtools/devops-api/values.yaml`'s `vault.secrets`
+> (same pattern as `GIT_TOKEN`). `devops-api`'s `app/v1/artifactory` module
+> now authenticates with `Authorization: Bearer` using this token
+> (`app/main.py`'s client construction, `ARTIFACTORY_TOKEN` in
+> `global_conf.py`) instead of Basic auth — confirmed live,
+> `Bearer <token>` against `/access/api/v1/projects` on `artifactory-0` →
+> `200`. See `devops-api/app/v1/artifactory/CLAUDE.md`'s "Auth: Bearer
+> token, not Basic" section for the full writeup, including confirmation
+> there's no platform toggle to re-enable Basic auth on the Access API.
