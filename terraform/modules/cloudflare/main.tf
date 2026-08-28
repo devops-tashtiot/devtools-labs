@@ -24,34 +24,50 @@ resource "cloudflare_dns_record" "this" {
 }
 
 # Lets a non-browser client (no interactive email-OTP flow possible) reach
-# any *.devopstashtiot.page hostname by sending CF-Access-Client-Id/
-# CF-Access-Client-Secret headers instead — e.g. GitHub Actions runners,
-# which are genuinely external (unlike an in-cluster caller such as
-# devops-api or Woodpecker, which bypass Access entirely via the CoreDNS
-# rewrites in devtools-labs/terraform/modules/minikube/main.tf and never
-# need this). Cloudflare only returns client_secret once, at creation —
-# published to SSM below, same as every other Cloudflare-issued credential
-# on this platform, rather than left only in Terraform state.
-resource "cloudflare_zero_trust_access_service_token" "github_actions" {
+# any *.devopstashtiot.page hostname over plain HTTPS by sending
+# CF-Access-Client-Id/CF-Access-Client-Secret headers instead — used by
+# developers pushing directly into Bitbucket (`git -c http.extraheader=...
+# push https://bitbucket.devopstashtiot.page/...`, combined with Bitbucket's
+# own Basic Auth), the sole source of truth for `devops-tashtiot` app repos.
+# GitHub is a read-only mirror (branch-protected so only the Woodpecker
+# mirror-to-github.yml pipeline in each app repo can write to it) kept in
+# sync by that pipeline alone — nothing pushes GitHub -> Bitbucket anymore.
+# Same pattern the old github_actions service token used, just for a human
+# git client instead of a CI runner. Cloudflare only returns client_secret
+# once, at creation — published to SSM below, same as every other
+# Cloudflare-issued credential on this platform, rather than left only in
+# Terraform state.
+#
+# IMPORTANT — this token's actual reach is domain-wide, not Bitbucket-
+# specific: its non_identity policy below sits on the shared Access
+# application whose `domain` is the bare wildcard "*.devopstashtiot.page",
+# so it bypasses Access's email-OTP wall for every tool on the platform
+# (Jira, ArgoCD, Grafana, MinIO, RHBK, ...), not just Bitbucket. Bitbucket
+# push is its current consumer, not the limit of what it can reach — its
+# display name (see the live/devtools/cloudflare terragrunt.hcl override)
+# is deliberately not just "bitbucket-push" for this reason. Anyone adding a
+# second consumer of this same token (or scoping a NEW non_identity policy)
+# should treat that as expanding access to the whole domain, not to one app.
+resource "cloudflare_zero_trust_access_service_token" "bitbucket_push" {
   account_id = var.cloudflare_account_id
-  name       = var.github_actions_service_token_name
+  name       = var.bitbucket_push_service_token_name
   duration   = "8760h"
 }
 
-resource "aws_ssm_parameter" "github_actions_service_token_client_id" {
-  name        = var.github_actions_service_token_client_id_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Access service token client ID for GitHub Actions to reach *.devopstashtiot.page past the email-OTP wall."
+resource "aws_ssm_parameter" "bitbucket_push_service_token_client_id" {
+  name        = var.bitbucket_push_service_token_client_id_ssm_parameter
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Access service token client ID — bypasses Access's email-OTP wall for the WHOLE *.devopstashtiot.page wildcard domain (not just Bitbucket; Bitbucket push is only its current consumer). See main.tf's header comment above cloudflare_zero_trust_access_service_token.bitbucket_push for the verified live scope. Nothing to retrieve manually — created automatically by `terragrunt apply` in terraform/live/devtools/cloudflare."
   type        = "SecureString"
-  value       = cloudflare_zero_trust_access_service_token.github_actions.client_id
+  value       = cloudflare_zero_trust_access_service_token.bitbucket_push.client_id
 
   tags = local.ssm_tags
 }
 
-resource "aws_ssm_parameter" "github_actions_service_token_client_secret" {
-  name        = var.github_actions_service_token_client_secret_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Access service token client secret for GitHub Actions to reach *.devopstashtiot.page past the email-OTP wall."
+resource "aws_ssm_parameter" "bitbucket_push_service_token_client_secret" {
+  name        = var.bitbucket_push_service_token_client_secret_ssm_parameter
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Access service token client secret — bypasses Access's email-OTP wall for the WHOLE *.devopstashtiot.page wildcard domain (not just Bitbucket; Bitbucket push is only its current consumer). See main.tf's header comment above cloudflare_zero_trust_access_service_token.bitbucket_push for the verified live scope. Nothing to retrieve manually — created automatically by `terragrunt apply` in terraform/live/devtools/cloudflare."
   type        = "SecureString"
-  value       = cloudflare_zero_trust_access_service_token.github_actions.client_secret
+  value       = cloudflare_zero_trust_access_service_token.bitbucket_push.client_secret
 
   tags = local.ssm_tags
 }
@@ -116,11 +132,11 @@ resource "cloudflare_zero_trust_access_application" "this" {
     # service tokens specifically (no identity/email is ever established for
     # these requests, unlike the "allow" policy above).
     {
-      name       = "GitHub Actions Service Token"
+      name       = "Wildcard Access OTP Bypass"
       decision   = "non_identity"
       precedence = 2
       include = [
-        { service_token = { token_id = cloudflare_zero_trust_access_service_token.github_actions.id } }
+        { service_token = { token_id = cloudflare_zero_trust_access_service_token.bitbucket_push.id } }
       ]
     }
   ]
@@ -188,7 +204,7 @@ resource "cloudflare_origin_ca_certificate" "this" {
 
 resource "aws_ssm_parameter" "origin_cert_crt" {
   name        = var.origin_cert_crt_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Origin CA certificate (public cert), consumed by clusters-provision/clusters/ingress-nginx via ExternalSecret."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Origin CA certificate (public cert), consumed by clusters-provision/clusters/ingress-nginx via ExternalSecret. Terraform-generated CSR submitted to Cloudflare's Origin CA API — nothing to retrieve manually, created automatically by `terragrunt apply` in terraform/live/devtools/cloudflare."
   type        = "SecureString"
   value       = cloudflare_origin_ca_certificate.this.certificate
 
@@ -197,7 +213,7 @@ resource "aws_ssm_parameter" "origin_cert_crt" {
 
 resource "aws_ssm_parameter" "origin_cert_key" {
   name        = var.origin_cert_key_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Origin CA certificate private key, consumed by clusters-provision/clusters/ingress-nginx via ExternalSecret."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/cloudflare). Do not edit manually; changes will be reverted on the next apply. Cloudflare Origin CA certificate private key, consumed by clusters-provision/clusters/ingress-nginx via ExternalSecret. Terraform-generated RSA key, never sent anywhere (only its CSR is) — nothing to retrieve manually, created automatically by `terragrunt apply` in terraform/live/devtools/cloudflare."
   type        = "SecureString"
   value       = tls_private_key.origin_cert.private_key_pem
 

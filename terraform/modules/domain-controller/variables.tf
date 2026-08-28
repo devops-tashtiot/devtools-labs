@@ -71,9 +71,9 @@ variable "domain_netbios_name" {
 }
 
 variable "admin_username_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) holding this instance's local Administrator username. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data."
+  description = "SSM Parameter Store path (SecureString) holding this instance's local Administrator username. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data. Category: terraform-created — plain value set in terraform/live/devtools/domain-controller/terragrunt.hcl."
   type        = string
-  default     = "/devtools/domain-controller/admin-username"
+  default     = "/devops/terraform-created/domain-controller/admin-username"
 }
 
 variable "admin_username" {
@@ -82,9 +82,9 @@ variable "admin_username" {
 }
 
 variable "admin_password_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) holding the Directory Services Restore Mode (DSRM) / local Administrator password, set during forest promotion. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data."
+  description = "SSM Parameter Store path (SecureString) holding the Directory Services Restore Mode (DSRM) / local Administrator password, set during forest promotion. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data. Category: terraform-created — value is human-chosen via TF_VAR_admin_password at apply time."
   type        = string
-  default     = "/devtools/domain-controller/admin-password"
+  default     = "/devops/terraform-created/domain-controller/admin-password"
 }
 
 variable "admin_password" {
@@ -100,9 +100,9 @@ variable "ou_name" {
 }
 
 variable "ldap_bind_username_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) holding the sAMAccountName for the read-only service account Bitbucket/RHBK use to bind to LDAP. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data."
+  description = "SSM Parameter Store path (SecureString) holding the sAMAccountName for the read-only service account Bitbucket/RHBK use to bind to LDAP. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data. Category: terraform-created — value comes from ad_group_member_username in terraform/live/devtools/domain-controller/terragrunt.hcl."
   type        = string
-  default     = "/devtools/domain-controller/ldap-bind-username"
+  default     = "/devops/terraform-created/domain-controller/ldap-bind-username"
 }
 
 variable "ldap_bind_password" {
@@ -112,9 +112,9 @@ variable "ldap_bind_password" {
 }
 
 variable "ldap_bind_password_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) holding the password for the LDAP bind service account. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data. clusters-definition/clusters/rhbk/values.yaml points at this same path so RHBK's LDAP bind credential stays in sync without ever sharing a literal value in git."
+  description = "SSM Parameter Store path (SecureString) holding the password for the LDAP bind service account. Fetched at boot by ad-bootstrap.ps1.tftpl — never baked into user-data. clusters-definition/clusters/rhbk/values.yaml points at this same path so RHBK's LDAP bind credential stays in sync without ever sharing a literal value in git. Category: terraform-created — value is human-chosen via TF_VAR_ldap_bind_password at apply time."
   type        = string
-  default     = "/devtools/domain-controller/ldap-bind-password"
+  default     = "/devops/terraform-created/domain-controller/ldap-bind-password"
 }
 
 variable "sample_user_username" {

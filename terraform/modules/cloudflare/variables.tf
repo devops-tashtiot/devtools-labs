@@ -68,20 +68,20 @@ variable "origin_cert_validity_days" {
   default     = 5475
 }
 
-variable "github_actions_service_token_name" {
-  description = "Display name for the Cloudflare Access service token used by GitHub Actions"
+variable "bitbucket_push_service_token_name" {
+  description = "Display name for the Cloudflare Access service token currently used to push to Bitbucket over HTTPS. Its non_identity policy lives on the wildcard *.devopstashtiot.page Access application, so it actually bypasses Access for every tool on the platform, not just Bitbucket — name it accordingly rather than implying a narrower scope than it has."
   type        = string
-  default     = "github-actions"
+  default     = "wildcard-access-otp-bypass"
 }
 
-variable "github_actions_service_token_client_id_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish the GitHub Actions service token's client ID to"
+variable "bitbucket_push_service_token_client_id_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) to publish the Bitbucket push service token's client ID to"
   type        = string
   default     = ""
 }
 
-variable "github_actions_service_token_client_secret_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish the GitHub Actions service token's client secret to"
+variable "bitbucket_push_service_token_client_secret_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) to publish the Bitbucket push service token's client secret to"
   type        = string
   default     = ""
 }

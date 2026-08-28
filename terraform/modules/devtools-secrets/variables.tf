@@ -5,21 +5,21 @@ variable "admin_password" {
 }
 
 variable "admin_password_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish admin_password to"
+  description = "SSM Parameter Store path (SecureString) to publish admin_password to. Category: terraform-created — the SSM object itself is Terraform-managed, but the value is human-chosen: exported as TF_VAR_admin_password before `terragrunt apply` (Terraform prompts interactively if not set)."
   type        = string
-  default     = "/devtools/admin/password"
+  default     = "/devops/terraform-created/admin/password"
 }
 
 variable "rhbk_oidc_client_secret_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish rhbk_oidc_client_secret to"
+  description = "SSM Parameter Store path (SecureString) to publish rhbk_oidc_client_secret to. Category: terraform-created — fully automatic, no human input (Terraform generates the value itself via random_password)."
   type        = string
-  default     = "/devtools/rhbk/oidc-client-secret"
+  default     = "/devops/terraform-created/rhbk/oidc-client-secret"
 }
 
 variable "cloudflare_origin_ca_root_cert_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish cloudflare_origin_ca_root_cert to"
+  description = "SSM Parameter Store path (SecureString) to publish cloudflare_origin_ca_root_cert to. Category: terraform-created — value is a static, publicly-published Cloudflare root cert committed in this module's files/ directory, applied automatically, no human input needed."
   type        = string
-  default     = "/devtools/cloudflare/origin-ca-root-cert"
+  default     = "/devops/terraform-created/cloudflare/origin-ca-root-cert"
 }
 
 variable "cloudflare_origin_ca_root_cert" {

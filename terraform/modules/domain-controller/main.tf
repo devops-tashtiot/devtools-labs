@@ -90,8 +90,8 @@ resource "aws_instance" "windows" {
 
 resource "aws_ssm_parameter" "ldap_connection_url" {
   count       = var.instance_enabled ? 1 : 0
-  name        = "/devtools/domain-controller/ldap-connection-url"
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. LDAP connection URL for the domain-controller EC2 instance, consumed by clusters-provision/clusters/rhbk via ExternalSecret (see clusters-definition/clusters/rhbk/values.yaml's ldap.connectionUrlSsmParameter)."
+  name        = "/devops/terraform-created/domain-controller/ldap-connection-url"
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. LDAP connection URL for the domain-controller EC2 instance, consumed by clusters-provision/clusters/rhbk via ExternalSecret (see clusters-definition/clusters/rhbk/values.yaml's ldap.connectionUrlSsmParameter). Computed automatically from the instance's current private IP on every apply — nothing to retrieve manually."
   type        = "SecureString"
   value       = "ldap://${aws_instance.windows[0].private_ip}:389"
   tags        = local.ssm_tags
@@ -114,7 +114,7 @@ resource "aws_ssm_parameter" "ldap_connection_url" {
 resource "aws_ssm_parameter" "admin_username" {
   count       = var.instance_enabled ? 1 : 0
   name        = var.admin_username_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Local Administrator/DSRM username, fetched at boot by ad-bootstrap.ps1.tftpl."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Local Administrator/DSRM username, fetched at boot by ad-bootstrap.ps1.tftpl. To change: edit admin_username in terraform/live/devtools/domain-controller/terragrunt.hcl and re-apply."
   type        = "SecureString"
   value       = var.admin_username
   tags        = local.ssm_tags
@@ -123,7 +123,7 @@ resource "aws_ssm_parameter" "admin_username" {
 resource "aws_ssm_parameter" "admin_password" {
   count       = var.instance_enabled ? 1 : 0
   name        = var.admin_password_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Local Administrator/DSRM password, fetched at boot by ad-bootstrap.ps1.tftpl."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Local Administrator/DSRM password, fetched at boot by ad-bootstrap.ps1.tftpl. To set/rotate: export TF_VAR_admin_password=<value> before running `terragrunt apply` in terraform/live/devtools/domain-controller (Terraform prompts interactively if not exported)."
   type        = "SecureString"
   value       = var.admin_password
   tags        = local.ssm_tags
@@ -132,7 +132,7 @@ resource "aws_ssm_parameter" "admin_password" {
 resource "aws_ssm_parameter" "ldap_bind_username" {
   count       = var.instance_enabled ? 1 : 0
   name        = var.ldap_bind_username_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. LDAP bind service account username, fetched at boot by ad-bootstrap.ps1.tftpl and consumed by clusters-definition/clusters/rhbk/values.yaml (ldap.usernameSsmParameter)."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. LDAP bind service account username, fetched at boot by ad-bootstrap.ps1.tftpl and consumed by clusters-definition/clusters/rhbk/values.yaml (ldap.usernameSsmParameter). Value comes from ad_group_member_username in terraform/live/devtools/domain-controller/terragrunt.hcl — no separate retrieval step."
   type        = "SecureString"
   value       = var.ad_group_member_username
   tags        = local.ssm_tags
@@ -141,7 +141,7 @@ resource "aws_ssm_parameter" "ldap_bind_username" {
 resource "aws_ssm_parameter" "ldap_bind_password" {
   count       = var.instance_enabled ? 1 : 0
   name        = var.ldap_bind_password_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. LDAP bind service account password, fetched at boot by ad-bootstrap.ps1.tftpl and consumed by clusters-definition/clusters/rhbk/values.yaml (ldap.passwordSsmParameter)."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. LDAP bind service account password, fetched at boot by ad-bootstrap.ps1.tftpl and consumed by clusters-definition/clusters/rhbk/values.yaml (ldap.passwordSsmParameter). To set/rotate: export TF_VAR_ldap_bind_password=<value> before running `terragrunt apply` in terraform/live/devtools/domain-controller (Terraform prompts interactively if not exported)."
   type        = "SecureString"
   value       = var.ldap_bind_password
   tags        = local.ssm_tags

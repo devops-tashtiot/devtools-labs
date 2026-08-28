@@ -69,10 +69,18 @@ resource "aws_db_instance" "this" {
   max_allocated_storage = var.max_allocated_storage
   storage_type          = "gp2"
 
-  backup_retention_period = 0
-  skip_final_snapshot     = true
-  deletion_protection     = false
-  publicly_accessible     = false
+  backup_retention_period = var.backup_retention_period
+  copy_tags_to_snapshot   = true
+  # skip_final_snapshot=false + a fixed final_snapshot_identifier: a real,
+  # Terraform-driven `terraform destroy` (the only path deletion_protection
+  # leaves open — it must be disabled here first, a separate deliberate
+  # commit) always leaves one last snapshot behind. Static, not timestamped,
+  # to avoid a perpetual plan diff; a second destroy+recreate cycle needing
+  # a fresh one can bump the suffix by hand.
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${var.identifier}-final-snapshot"
+  deletion_protection       = var.deletion_protection
+  publicly_accessible       = false
 
   tags = {
     Name = var.identifier
@@ -81,7 +89,7 @@ resource "aws_db_instance" "this" {
 
 resource "aws_ssm_parameter" "admin_username" {
   name        = var.admin_username_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/rds). Do not edit manually; changes will be reverted on the next apply. RDS master DB username, consumed by devtool init containers (see devtools-definition/*/values.yaml's rds.usernameSsmParameter) to provision their own per-tool databases/roles."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/rds). Do not edit manually; changes will be reverted on the next apply. RDS master DB username, consumed by devtool init containers (see devtools-definition/*/values.yaml's rds.usernameSsmParameter) to provision their own per-tool databases/roles. To change: edit db_username in terraform/live/devtools/rds/terragrunt.hcl and re-apply."
   type        = "SecureString"
   value       = var.db_username
   tags        = local.ssm_tags
@@ -89,7 +97,7 @@ resource "aws_ssm_parameter" "admin_username" {
 
 resource "aws_ssm_parameter" "admin_password" {
   name        = var.admin_password_ssm_parameter
-  description = "Created by GitOps — devtools-labs Terraform (terraform/modules/rds). Do not edit manually; changes will be reverted on the next apply. RDS master DB password, consumed by devtool init containers (see devtools-definition/*/values.yaml's rds.passwordSsmParameter) to provision their own per-tool databases/roles."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/rds). Do not edit manually; changes will be reverted on the next apply. RDS master DB password, consumed by devtool init containers (see devtools-definition/*/values.yaml's rds.passwordSsmParameter) to provision their own per-tool databases/roles. To set/rotate: export TF_VAR_db_password=<value> before running `terragrunt apply` in terraform/live/devtools/rds (Terraform prompts interactively if not exported)."
   type        = "SecureString"
   value       = var.db_password
   tags        = local.ssm_tags

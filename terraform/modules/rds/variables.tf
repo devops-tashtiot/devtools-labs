@@ -39,15 +39,15 @@ variable "db_password" {
 }
 
 variable "admin_username_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish db_username to"
+  description = "SSM Parameter Store path (SecureString) to publish db_username to. Category: terraform-created — plain value set directly in terraform/live/devtools/rds/terragrunt.hcl, applied automatically."
   type        = string
-  default     = "/devtools/rds/admin-username"
+  default     = "/devops/terraform-created/rds/admin-username"
 }
 
 variable "admin_password_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish db_password to"
+  description = "SSM Parameter Store path (SecureString) to publish db_password to. Category: terraform-created — the SSM object is Terraform-managed, but the value is human-chosen: exported as TF_VAR_db_password before `terragrunt apply` (Terraform prompts interactively if not set)."
   type        = string
-  default     = "/devtools/rds/admin-password"
+  default     = "/devops/terraform-created/rds/admin-password"
 }
 
 variable "postgres_version" {
@@ -105,4 +105,16 @@ variable "schedule_timezone" {
   description = "IANA timezone stop_schedule_cron is evaluated in."
   type        = string
   default     = "Asia/Jerusalem"
+}
+
+variable "deletion_protection" {
+  description = "AWS enforces this at the API level — DeleteDBInstance is rejected outright, regardless of skipFinalSnapshot/deleteAutomatedBackups on the request and regardless of the caller's IAM permissions, unless deletion protection is explicitly disabled first (ModifyDBInstance, a separate auditable step). This is the real guardrail against an accidental or malicious DeleteDBInstance call."
+  type        = bool
+  default     = true
+}
+
+variable "backup_retention_period" {
+  description = "Days of automated backups AWS retains (point-in-time recovery). 0 disables automated backups entirely — that was this instance's prior setting, and combined with skipFinalSnapshot=true on the delete call that destroyed it, left nothing to restore from."
+  type        = number
+  default     = 7
 }

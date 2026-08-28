@@ -65,7 +65,7 @@ output "ldap_bind_username_ssm_parameter" {
 
 output "ldap_connection_url_ssm_parameter" {
   description = "SSM parameter path holding the current ldap://<private_ip>:389 connection URL — rewritten on every apply, so consumers reading from SSM never need a manual update when the instance is replaced."
-  value       = var.instance_enabled ? "/devtools/domain-controller/ldap-connection-url" : null
+  value       = var.instance_enabled ? "/devops/terraform-created/domain-controller/ldap-connection-url" : null
 }
 
 output "admin_password_command" {

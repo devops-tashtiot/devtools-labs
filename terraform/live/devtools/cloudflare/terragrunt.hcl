@@ -129,18 +129,38 @@ inputs = {
     "yrahaty@gmail.com",
     "gulmanm@post.bgu.ac.il",
     "naama3434@gmail.com",
-    "jonatan.netanel@gmail.com",
+    "jonatan.nethanel@gmail.com",
     "amitorenshtein@gmail.com",
   ]
 
-  # Cloudflare Access service token for GitHub Actions — lets the
-  # GitHub<->Bitbucket repo mirror workflow (external to this cluster, so it
-  # can't use the CoreDNS-rewrite bypass in-cluster callers use) reach
-  # bitbucket.devopstashtiot.page without a human email-OTP login. See
-  # main.tf's github_actions service token + the second Access policy.
-  github_actions_service_token_name                         = "github-actions-repo-sync"
-  github_actions_service_token_client_id_ssm_parameter       = "/devtools/cloudflare/github-actions-service-token-client-id"
-  github_actions_service_token_client_secret_ssm_parameter   = "/devtools/cloudflare/github-actions-service-token-client-secret"
+  # Bitbucket is the sole source of truth for devops-tashtiot app repos —
+  # developers push directly into it over HTTPS (bitbucket.devopstashtiot.page,
+  # same hostname the web UI uses), authenticating past Access's email-OTP
+  # wall with this service token's headers plus Bitbucket's own Basic Auth.
+  # See main.tf's bitbucket_push service token + its policy on the shared
+  # wildcard Access application, and the Woodpecker mirror-to-github.yml
+  # pipeline in each app repo that mirrors every Bitbucket push onward to
+  # that repo's (branch-protected, read-only) GitHub copy — nothing pushes
+  # GitHub -> Bitbucket anymore.
+  #
+  # Display name deliberately does NOT say just "bitbucket-push" — verified
+  # live (terragrunt state show cloudflare_zero_trust_access_application.this)
+  # that its non_identity policy sits on the SAME Access application whose
+  # domain is the bare wildcard "*.devopstashtiot.page", not a Bitbucket-
+  # specific hostname. So this token bypasses Cloudflare Access's email-OTP
+  # wall for every tool on the platform (Jira, ArgoCD, Grafana, MinIO, RHBK,
+  # ...), not just Bitbucket — Bitbucket push is only its current CONSUMER,
+  # not the boundary of what it can reach. Named so anyone auditing Access
+  # policies later sees the real blast radius immediately instead of
+  # assuming (wrongly) that a leak only affects Bitbucket. The Terraform
+  # resource address (bitbucket_push) and the SSM parameter paths below are
+  # deliberately left unrenamed — those are load-bearing for existing
+  # consumers (every repo's mirror-to-github.yml pipeline, and the laptop
+  # push instructions in the root CLAUDE.md); renaming them would require a
+  # coordinated update across all of those, not just this file.
+  bitbucket_push_service_token_name                       = "wildcard-access-otp-bypass"
+  bitbucket_push_service_token_client_id_ssm_parameter     = "/devops/terraform-created/cloudflare/wildcard-access-otp-bypass-client-id"
+  bitbucket_push_service_token_client_secret_ssm_parameter = "/devops/terraform-created/cloudflare/wildcard-access-otp-bypass-client-secret"
 
   # Read-only visibility into the tunnel that cloudflared already uses in
   # production — see main.tf for why this module looks it up via a `data`
@@ -167,6 +187,6 @@ inputs = {
     "*.woodpecker.devopstashtiot.page",
     "*.sonarqube.devopstashtiot.page",
   ]
-  origin_cert_crt_ssm_parameter = "/devtools/cloudflare/origin-cert-crt"
-  origin_cert_key_ssm_parameter = "/devtools/cloudflare/origin-cert-key"
+  origin_cert_crt_ssm_parameter = "/devops/terraform-created/cloudflare/origin-cert-crt"
+  origin_cert_key_ssm_parameter = "/devops/terraform-created/cloudflare/origin-cert-key"
 }
