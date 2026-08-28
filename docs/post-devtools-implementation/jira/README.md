@@ -14,7 +14,7 @@ these manual steps remain before it's fully usable:
 Jira's Helm chart has no mechanism to auto-complete this — see
 `devtools-provision/devtools/jira/values.yaml`'s header comment. Complete
 Jira's first-run setup wizard once in the browser after initial deploy, using
-the shared admin password (`/devtools/admin/password`) when creating the
+the shared admin password (`/devops/terraform-created/admin/password`) when creating the
 first sysadmin account, same as every other devtool on this platform.
 
 ---
@@ -34,11 +34,11 @@ directory connector** (embedded-crowd's LDAP directory screen).
 | Field | Value | Why |
 |---|---|---|
 | Directory Type | Microsoft Active Directory | |
-| Hostname | the domain controller's current private IP (`aws ec2 describe-instances` on the `WIN-SRV-01` instance, or the `/devtools/domain-controller/ldap-connection-url` SSM parameter) | see callout below — do **not** use the domain DNS name here |
+| Hostname | the domain controller's current private IP (`aws ec2 describe-instances` on the `WIN-SRV-01` instance, or the `/devops/terraform-created/domain-controller/ldap-connection-url` SSM parameter) | see callout below — do **not** use the domain DNS name here |
 | Port | `389` | Plain LDAP, not LDAPS — the domain controller isn't configured for TLS on the LDAP port |
 | Use SSL | **No** | matches the plain `ldap://` scheme above |
-| Username | the bind account's UPN, `<bind-username>@devtools.local` (username from `/devtools/domain-controller/ldap-bind-username`) | same bind account RHBK's `set-ldap-credentials-job.yaml` uses |
-| Password | fetch with `aws ssm get-parameter --name /devtools/domain-controller/ldap-bind-password --with-decryption` | never commit this value anywhere |
+| Username | the bind account's UPN, `<bind-username>@devtools.local` (username from `/devops/terraform-created/domain-controller/ldap-bind-username`) | same bind account RHBK's `set-ldap-credentials-job.yaml` uses |
+| Password | fetch with `aws ssm get-parameter --name /devops/terraform-created/domain-controller/ldap-bind-password --with-decryption` | never commit this value anywhere |
 | Base DN | `OU=devops-tashtiot,DC=devtools,DC=local` | from `domain-controller`'s `ou_name`/`domain_name` variables |
 
 > **Hostname must be an IP, not `devtools.local`:** there is no DNS zone for
@@ -198,12 +198,12 @@ populated by Keycloak's default `profile` client scope (confirmed present on
 protocol mapper).
 
 **Client Secret:** shared across all six RHBK OIDC clients
-(`/devtools/rhbk/oidc-client-secret`, Terraform-generated —
+(`/devops/terraform-created/rhbk/oidc-client-secret`, Terraform-generated —
 `devtools-labs/terraform/modules/devtools-secrets`), but Jira isn't wired to
 SSM/ExternalSecret like ArgoCD/SonarQube/Grafana are — this value must be
 pasted into Jira's SSO client secret field manually, and **manually updated
 again any time the secret rotates** (it won't auto-propagate). Fetch the
 current value with:
 ```bash
-aws ssm get-parameter --name /devtools/rhbk/oidc-client-secret --with-decryption --profile 342831714456_Workload-Admin-PS --region il-central-1 --query "Parameter.Value" --output text
+aws ssm get-parameter --name /devops/terraform-created/rhbk/oidc-client-secret --with-decryption --profile 342831714456_Workload-Admin-PS --region il-central-1 --query "Parameter.Value" --output text
 ```

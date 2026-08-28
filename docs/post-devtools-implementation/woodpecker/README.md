@@ -28,11 +28,11 @@ Publish them to SSM (`SecureString`, matching every other devtool's
 convention of never committing real credentials to git):
 
 ```bash
-aws ssm put-parameter --name /devtools/woodpecker/bitbucket-client-id \
+aws ssm put-parameter --name /devops/postdeploy/woodpecker/bitbucket-client-id \
   --type SecureString --value "<client-id>" --overwrite \
   --profile 342831714456_Workload-Admin-PS --region il-central-1
 
-aws ssm put-parameter --name /devtools/woodpecker/bitbucket-client-secret \
+aws ssm put-parameter --name /devops/postdeploy/woodpecker/bitbucket-client-secret \
   --type SecureString --value "<client-secret>" --overwrite \
   --profile 342831714456_Workload-Admin-PS --region il-central-1
 ```
@@ -47,7 +47,7 @@ parameters exist.
 
 The `woodpecker-bitbucket-dc-credentials` `ExternalSecret` fetches **three**
 values from SSM in one object: the client id, the client secret, and a git
-machine-account password (`/devtools/admin/password` — the platform's
+machine-account password (`/devops/terraform-created/admin/password` — the platform's
 shared admin password, already populated and otherwise fine on its own).
 
 External Secrets Operator does not partially apply an `ExternalSecret` — if

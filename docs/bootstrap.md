@@ -89,7 +89,7 @@ beforehand to avoid juggling simultaneous prompts.
   testing LDAP integration; publishes admin/LDAP-bind creds to SSM.
 - **`cloudflare`** — the Cloudflare zone, DNS CNAME records per subdomain,
   and the Access policy; read-only lookups of the tunnel and Origin CA cert.
-- **`devtools-secrets`** — the shared `/devtools/admin/password` every devtool
+- **`devtools-secrets`** — the shared `/devops/terraform-created/admin/password` every devtool
   uses as its initial admin password, plus the shared RHBK OIDC client
   secret.
 - **`minikube`** — the real bootstrap, and the slow one (~15-20 min):
@@ -115,7 +115,7 @@ beforehand to avoid juggling simultaneous prompts.
 
 Once `minikube`'s apply finishes, ArgoCD is reachable at
 `https://argocd.devopstashtiot.page` — user `admin`, password is the shared
-value at `/devtools/admin/password` in SSM Parameter Store — and every
+value at `/devops/terraform-created/admin/password` in SSM Parameter Store — and every
 devtool Application should show up Syncing/Healthy over the following few
 minutes as ArgoCD works through `devtools-applicationset`.
 

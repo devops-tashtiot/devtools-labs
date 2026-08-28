@@ -57,16 +57,16 @@ This means a Bearer token cannot be bootstrapped via the API at all; it
 requires an interactive UI login:
 
 1. Log into Artifactory's Admin UI as `admin` (password: shared platform
-   admin password, `/devtools/admin/password` in SSM).
+   admin password, `/devops/terraform-created/admin/password` in SSM).
 2. User Profile (top right) → **Generate Identity Token**.
 3. Publish it to SSM:
    ```bash
-   aws ssm put-parameter --name /devtools/artifactory/api-token --type SecureString --value "<token>" --overwrite --profile 342831714456_Workload-Admin-PS --region il-central-1
+   aws ssm put-parameter --name /devops/postdeploy/artifactory/api-token --type SecureString --value "<token>" --overwrite --profile 342831714456_Workload-Admin-PS --region il-central-1
    ```
 
 Not GitOps-managed — rotate it the same way (manual `put-parameter`), same
-as Bitbucket's `/devtools/bitbucket/api-token` and ArgoCD's
-`/devtools/argocd/api-token`.
+as Bitbucket's `/devops/postdeploy/bitbucket/api-token` and ArgoCD's
+`/devops/postdeploy/argocd/api-token`.
 
 > **Wiring status as of 2026-08-16:** fully wired and verified live. The
 > parameter holds a fresh Identity Token (rotated 2026-08-16, the

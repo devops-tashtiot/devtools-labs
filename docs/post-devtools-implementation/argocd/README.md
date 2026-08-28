@@ -31,10 +31,10 @@ argocd account generate-token --account <account-name>
 ```
 Publish it to SSM:
 ```bash
-aws ssm put-parameter --name /devtools/argocd/api-token --type SecureString --value "<token>" --overwrite --profile 342831714456_Workload-Admin-PS --region il-central-1
+aws ssm put-parameter --name /devops/postdeploy/argocd/api-token --type SecureString --value "<token>" --overwrite --profile 342831714456_Workload-Admin-PS --region il-central-1
 ```
 Not GitOps-managed — rotate it the same way (manual `put-parameter`), same
-as Bitbucket's `/devtools/bitbucket/api-token`.
+as Bitbucket's `/devops/postdeploy/bitbucket/api-token`.
 
 > **Wiring status as of 2026-07-14:** this parameter exists and is
 > populated, but `devtools-definition/devtools/devops-api/values.yaml`'s
