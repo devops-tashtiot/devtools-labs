@@ -32,10 +32,10 @@ variable "db_username" {
   default     = "devtools"
 }
 
-variable "db_password" {
-  description = "Master DB password. No default — Terraform prompts for it interactively on apply if not supplied via TF_VAR_db_password or a tfvars file."
+variable "generic_password_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) holding the shared prerequisite password consumed as both the RDS master password (this module) and the devtools admin password (devtools-secrets module). Category: prerequisite — set this once via aws ssm put-parameter before the first apply of either module; no TF_VAR needed."
   type        = string
-  sensitive   = true
+  default     = "/devops/prerequisite/generic-password"
 }
 
 variable "admin_username_ssm_parameter" {
@@ -45,7 +45,7 @@ variable "admin_username_ssm_parameter" {
 }
 
 variable "admin_password_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish db_password to. Category: terraform-created — the SSM object is Terraform-managed, but the value is human-chosen: exported as TF_VAR_db_password before `terragrunt apply` (Terraform prompts interactively if not set)."
+  description = "SSM Parameter Store path (SecureString) to publish the RDS master password to. Category: terraform-created — value is read automatically from generic_password_ssm_parameter, republished here for devtools that expect a dedicated path."
   type        = string
   default     = "/devops/terraform-created/rds/admin-password"
 }
@@ -69,9 +69,9 @@ variable "allocated_storage" {
 }
 
 variable "max_allocated_storage" {
-  description = "Ceiling for RDS storage autoscaling in GB."
+  description = "Ceiling for RDS storage autoscaling in GB. Must stay above allocated_storage — equal values (the old default) mean autoscaling has zero room to grow, which is what triggered AWS's 'Storage size is approaching the maximum storage threshold' alert even though actual usage was low (~1.85GB of the 20GB allocated at the time): allocated storage had already reached this ceiling, so no further auto-growth was possible."
   type        = number
-  default     = 20
+  default     = 100
 }
 
 variable "aws_region" {
