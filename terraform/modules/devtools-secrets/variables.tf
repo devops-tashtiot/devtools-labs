@@ -1,11 +1,11 @@
-variable "admin_password" {
-  description = "Shared initial admin password for every devtool on the platform (see devtools-provision/README.md). No default — Terraform prompts for it interactively on apply if not supplied via TF_VAR_admin_password or a tfvars file."
+variable "generic_password_ssm_parameter" {
+  description = "SSM Parameter Store path (SecureString) holding the shared prerequisite password consumed as both the devtools admin password (this module) and the RDS master password (rds module). Category: prerequisite — set this once via aws ssm put-parameter before the first apply of either module; no TF_VAR needed."
   type        = string
-  sensitive   = true
+  default     = "/devops/prerequisite/generic-password"
 }
 
 variable "admin_password_ssm_parameter" {
-  description = "SSM Parameter Store path (SecureString) to publish admin_password to. Category: terraform-created — the SSM object itself is Terraform-managed, but the value is human-chosen: exported as TF_VAR_admin_password before `terragrunt apply` (Terraform prompts interactively if not set)."
+  description = "SSM Parameter Store path (SecureString) to publish the devtools admin password to. Category: terraform-created — value is read automatically from generic_password_ssm_parameter, republished here for devtools that expect a dedicated path."
   type        = string
   default     = "/devops/terraform-created/admin/password"
 }

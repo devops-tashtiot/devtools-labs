@@ -17,11 +17,22 @@ locals {
   cloudflare_origin_ca_root_cert = var.cloudflare_origin_ca_root_cert != "" ? var.cloudflare_origin_ca_root_cert : file("${path.module}/files/cloudflare-origin-ca-rsa-root.pem")
 }
 
+# Consolidated with rds's db_password onto one shared prerequisite secret
+# (deliberate simplification, not an oversight) — this platform doesn't need
+# separate credentials per resource, so one password a human sets once in
+# SSM before the first apply replaces two separate TF_VAR_* prompts. A plain
+# data source, not a managed resource: this repo never owns the prerequisite
+# value's lifecycle, only reads it.
+data "aws_ssm_parameter" "generic_password" {
+  name            = var.generic_password_ssm_parameter
+  with_decryption = true
+}
+
 resource "aws_ssm_parameter" "admin_password" {
   name        = var.admin_password_ssm_parameter
-  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/devtools-secrets). Do not edit manually; changes will be reverted on the next apply. Shared initial admin password for every devtool on the platform (see devtools-provision/README.md). To set/rotate: export TF_VAR_admin_password=<value> before running `terragrunt apply` in terraform/live/devtools/devtools-secrets (Terraform prompts interactively if not exported)."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/devtools-secrets). Do not edit manually; changes will be reverted on the next apply. Shared initial admin password for every devtool on the platform (see devtools-provision/README.md). Value comes from the prerequisite secret at var.generic_password_ssm_parameter (default /devops/prerequisite/generic-password) — set that once before the first apply; no TF_VAR needed."
   type        = "SecureString"
-  value       = var.admin_password
+  value       = data.aws_ssm_parameter.generic_password.value
   tags        = local.ssm_tags
 }
 
