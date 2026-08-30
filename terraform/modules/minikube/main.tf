@@ -272,7 +272,13 @@ resource "aws_ebs_volume" "minikube_data" {
   type              = "gp3"
   encrypted         = true
 
-  tags = { Name = "${var.instance_name}-data" }
+  # DlmManaged=true is the target_tags selector for aws_dlm_lifecycle_policy.data_volume
+  # below — DLM snapshots this volume independently of Terraform state or instance
+  # lifecycle, so a snapshot survives even a direct, out-of-band DeleteVolume call.
+  # BackupManaged=true is the second, independent selector the backup module's
+  # aws_backup_selection matches on, landing a copy of the same volume in the
+  # AWS Backup vault too — two separate systems, neither depending on the other.
+  tags = { Name = "${var.instance_name}-data", DlmManaged = "true", BackupManaged = "true" }
 
   lifecycle {
     prevent_destroy = true
@@ -295,6 +301,14 @@ resource "aws_instance" "minikube" {
   key_name               = var.key_pair_name != "" ? var.key_pair_name : null
 
   associate_public_ip_address = false
+
+  # AWS enforces this at the API level regardless of the caller's IAM
+  # permissions — TerminateInstances is rejected outright unless
+  # ModifyInstanceAttribute disables this first, as a separate, auditable
+  # step. See enable_termination_protection's description for why this
+  # (not prevent_destroy, which only guards `terraform destroy`) is the
+  # real guardrail here.
+  disable_api_termination = var.enable_termination_protection
 
   user_data = base64encode(local.user_data)
 
@@ -337,5 +351,70 @@ resource "aws_instance" "minikube" {
 
   lifecycle {
     ignore_changes = [ami]
+  }
+}
+
+# ── Independent snapshot safety net for the persistent data volume ─────────────
+# This is deliberately NOT the same protection as disable_api_termination above:
+# that blocks the TerminateInstances call itself, but anyone who can call
+# ModifyInstanceAttribute can disable it first. DLM snapshots exist independently
+# of the instance/volume lifecycle entirely — even a deliberate, out-of-band
+# DeleteVolume (exactly what happened: 13 volumes deleted directly via the AWS
+# API, bypassing Terraform's prevent_destroy, which only guards `terraform
+# destroy`) leaves the most recent snapshot(s) intact, so a fresh volume can be
+# restored from one.
+data "aws_iam_policy_document" "dlm_assume_role" {
+  count = var.enable_data_volume_backups ? 1 : 0
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["dlm.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "dlm" {
+  count              = var.enable_data_volume_backups ? 1 : 0
+  name               = "${var.instance_name}-dlm-role"
+  assume_role_policy = data.aws_iam_policy_document.dlm_assume_role[0].json
+}
+
+resource "aws_iam_role_policy_attachment" "dlm" {
+  count      = var.enable_data_volume_backups ? 1 : 0
+  role       = aws_iam_role.dlm[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+}
+
+resource "aws_dlm_lifecycle_policy" "data_volume" {
+  count              = var.enable_data_volume_backups ? 1 : 0
+  description        = "${var.instance_name} data volume daily snapshots"
+  execution_role_arn = aws_iam_role.dlm[0].arn
+  state              = "ENABLED"
+
+  policy_details {
+    resource_types = ["VOLUME"]
+
+    target_tags = {
+      DlmManaged = "true"
+    }
+
+    schedule {
+      name = "daily-snapshot"
+
+      create_rule {
+        cron_expression = var.data_volume_backup_schedule_cron
+      }
+
+      retain_rule {
+        count = var.data_volume_backup_retain_count
+      }
+
+      tags_to_add = {
+        SnapshotCreator = "DLM"
+      }
+
+      copy_tags = true
+    }
   }
 }

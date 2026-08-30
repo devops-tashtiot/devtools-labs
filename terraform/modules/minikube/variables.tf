@@ -123,3 +123,27 @@ variable "schedule_timezone" {
   type        = string
   default     = "Asia/Jerusalem"
 }
+
+variable "enable_termination_protection" {
+  description = "Set disable_api_termination on the instance. AWS enforces this at the API level — TerminateInstances is rejected outright (ModifyInstanceAttribute must disable it first, as a separate, auditable step) regardless of the caller's IAM permissions. This is the real guardrail against an accidental or malicious TerminateInstances call; prevent_destroy on the data volume only blocks `terraform destroy`, not a direct AWS API call."
+  type        = bool
+  default     = true
+}
+
+variable "enable_data_volume_backups" {
+  description = "Create a Data Lifecycle Manager policy that snapshots the persistent data volume on a schedule. This is the actual data-safety net: even if termination protection is deliberately disabled and the instance/volume is destroyed, recent snapshots survive independently and can rebuild a new volume from them."
+  type        = bool
+  default     = true
+}
+
+variable "data_volume_backup_schedule_cron" {
+  description = "DLM cron expression (UTC) for when the daily data-volume snapshot is taken."
+  type        = string
+  default     = "cron(0 2 * * ? *)"
+}
+
+variable "data_volume_backup_retain_count" {
+  description = "Number of most-recent data-volume snapshots to retain before older ones are pruned."
+  type        = number
+  default     = 7
+}
