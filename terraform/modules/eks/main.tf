@@ -193,8 +193,13 @@ resource "aws_security_group" "efs" {
 resource "aws_efs_file_system" "shared_home" {
   encrypted = true
 
+  # BackupManaged=true is the tag terraform/modules/backup's aws_backup_selection
+  # matches on — this filesystem holds bitbucket/jira/confluence's sharedHome,
+  # not just node-local cache data, so it's covered by the same daily
+  # backup+cross-region-copy plan as the RDS instance.
   tags = {
-    Name = "${var.cluster_name}-shared-home"
+    Name          = "${var.cluster_name}-shared-home"
+    BackupManaged = "true"
   }
 }
 

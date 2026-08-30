@@ -26,6 +26,17 @@ resource "aws_backup_vault" "this" {
   name = var.vault_name
 }
 
+# Cross-region DR copy destination. RDS snapshots and EFS backups are both
+# regional resources — restoring within the same region doesn't help if the
+# incident is regional (or, as with the original data-loss incident, caused
+# by a broad admin role that has the same reach across every region it can
+# already touch in-region). A copy that already landed in a second region
+# before an incident is outside that blast radius.
+resource "aws_backup_vault" "dr" {
+  provider = aws.dr
+  name     = var.dr_vault_name
+}
+
 data "aws_iam_policy_document" "backup_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -61,6 +72,14 @@ resource "aws_backup_plan" "this" {
 
     lifecycle {
       delete_after = var.retention_days
+    }
+
+    copy_action {
+      destination_vault_arn = aws_backup_vault.dr.arn
+
+      lifecycle {
+        delete_after = var.retention_days
+      }
     }
   }
 }

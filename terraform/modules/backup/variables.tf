@@ -16,6 +16,18 @@ variable "vault_name" {
   default     = "devtools-backup-vault"
 }
 
+variable "dr_region" {
+  description = "Destination region for cross-region backup copies (RDS snapshots and EFS backups are regional resources — a single-region incident, or account-level action against the primary region, can't touch a copy that already landed here). us-east-1 chosen for confirmed AWS Backup + RDS resource-type support; eu-central-1/eu-west-1 were the closer EU-based alternatives considered."
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "dr_vault_name" {
+  description = "AWS Backup vault name in dr_region that copies land in."
+  type        = string
+  default     = "devtools-backup-vault-dr"
+}
+
 variable "rds_instance_arn" {
   description = "ARN of the RDS instance to back up via AWS Backup's native RDS support (produces a consistent DB snapshot through the Backup service, tracked in this vault instead of RDS's own disconnected snapshot list)."
   type        = string
