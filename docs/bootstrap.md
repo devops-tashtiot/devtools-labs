@@ -1,17 +1,17 @@
 # Bootstrap from Scratch
 
 End-to-end sequence for standing up this platform in a brand-new (or fully
-destroyed) AWS account: bootstrap remote state, apply all five Terragrunt
+destroyed) AWS account: bootstrap remote state, apply all six Terragrunt
 units, then finish the manual per-devtool configuration that isn't
 GitOps-managed.
 
 !!! important "devtools-labs creates the whole cluster + devtools stack automatically"
-    Terraform in this repo only ever touches five things: `minikube`, `rds`,
-    `domain-controller`, `cloudflare`, `devtools-secrets`. It never runs Helm
-    or `kubectl apply` against an individual cluster-infra tool or devtool.
-    Instead, the `minikube` unit's apply installs ArgoCD and registers two
-    `ApplicationSet`s — `clusters-applicationset` and
-    `devtools-applicationset` — that **auto-discover every chart** in the
+    Terraform in this repo only ever touches six things: `eks`, `rds`,
+    `domain-controller`, `cloudflare`, `devtools-secrets`, `backup`. It never
+    runs Helm or `kubectl apply` against an individual cluster-infra tool or
+    devtool. Instead, the `eks` unit's apply creates the cluster, installs
+    ArgoCD, and registers two `ApplicationSet`s — `clusters-applicationset`
+    and `devtools-applicationset` — that **auto-discover every chart** in the
     `clusters-provision`/`devtools-provision` repos and **auto-sync** them
     against the matching overrides in `clusters-definition`/
     `devtools-definition`. From the moment that apply finishes, every cluster
@@ -49,13 +49,38 @@ Run this **once per AWS account**, using the `342831714456_Workload-Admin-PS`
 profile. Skip it entirely if the bucket already exists (e.g. any subsequent
 `devtools-labs` rebuild in the same account).
 
-## 2. Apply all five units in `devtools-labs`
+## 2. Prerequisite: SSM parameters you set by hand
 
-Once the state bucket exists, `terraform/live/devtools` has five independent
-Terragrunt units — `minikube`, `rds`, `domain-controller`, `cloudflare`,
-`devtools-secrets` — with no dependency graph between them (see
-`devtools-labs/CLAUDE.md` → "Five independent units"). `terragrunt run-all
-apply` from that directory runs all five in parallel:
+A handful of values have to exist in SSM Parameter Store **before** the
+first `terragrunt apply` — Terraform reads them as data sources rather than
+prompting for them or generating them itself. Set each with
+`aws ssm put-parameter --type SecureString --overwrite`:
+
+| Parameter | Used by | Notes |
+|---|---|---|
+| `/devops/prerequisite/generic-password` | `rds` (master DB password) and `devtools-secrets` (shared devtools admin password) | One value, deliberately shared — this platform doesn't need separate credentials per resource. Both modules read the same parameter via a `data "aws_ssm_parameter"` lookup; neither owns its lifecycle. |
+| `/devops/prerequisite/bitbucket/license` | Bitbucket's Helm release (`licenseSsmParameter`) | Get this from your Atlassian license/trial account. |
+| `/devops/prerequisite/confluence/license` | Confluence's Helm release (`licenseSsmParameter`) | Same as above. |
+
+Jira has no equivalent license parameter in this platform — its license is
+entered by hand in the setup wizard (see
+[`post-devtools-implementation/jira`](post-devtools-implementation/jira/README.md)).
+
+`domain-controller`'s `admin_password`/`ldap_bind_password` are **not** part
+of this prerequisite-SSM pattern — they stay as interactive `TF_VAR_*`
+prompts (see the next section). That's a deliberate exception: consolidating
+them onto the shared generic password would mean a future password rotation
+also rotates the domain controller's DSRM/local Administrator credential,
+which risks an unrecoverable AD forest if it goes wrong mid-promotion.
+
+## 3. Apply all six units in `devtools-labs`
+
+Once the state bucket and prerequisite SSM parameters above exist,
+`terraform/live/devtools` has six independent Terragrunt units — `eks`,
+`rds`, `domain-controller`, `cloudflare`, `devtools-secrets`, `backup` — with
+no dependency graph between them (see `devtools-labs/CLAUDE.md` → "Six
+independent units"). `terragrunt run-all apply` from that directory runs all
+of them in parallel:
 
 ```bash
 cd terraform/live/devtools
@@ -63,49 +88,63 @@ terragrunt run-all plan     # dry run
 terragrunt run-all apply
 ```
 
-### Prerequisite: the Minikube base AMI
-
-The `minikube` module looks up the latest AMI matching
-`minikube-devtools-base-*`. On a fresh account none exists yet — build it
-first via the separate
-[`devops-tashtiot/minikube-ami`](https://github.com/devops-tashtiot/minikube-ami)
-Packer template. `devtools-labs/CLAUDE.md` → "Building the Minikube base AMI"
-has the exact one-time bootstrap + `packer build` commands (it needs a
-security group / IAM instance profile from the `minikube` unit to exist
-first, via a `-target`ed partial apply).
-
-`run-all apply` will prompt interactively for every sensitive variable with
-no default, across whichever units happen to run first: `rds`'s
-`db_password`, `domain-controller`'s `admin_password`/`ldap_bind_password`,
-`devtools-secrets`' `admin_password`. Export the matching `TF_VAR_*` env vars
-beforehand to avoid juggling simultaneous prompts.
+`run-all apply` will still prompt interactively for `domain-controller`'s
+`admin_password`/`ldap_bind_password` (no default, not sourced from the
+prerequisite SSM pattern — see above). Export the matching `TF_VAR_*` env
+vars beforehand to avoid an interactive prompt mid-`run-all`.
 
 ### What this apply actually does
 
-- **`rds`** — a Postgres RDS instance (`db.t3.micro`/20GB, free-tier) devtools
-  like Bitbucket use as an external database; publishes admin creds to SSM.
+- **`rds`** — a Postgres RDS instance (`db.t3.small`, autoscaling storage)
+  devtools like Bitbucket use as an external database; its master password
+  comes from `/devops/prerequisite/generic-password`, republished to
+  `/devops/terraform-created/rds/admin-password` for devtool init containers
+  to read.
 - **`domain-controller`** — a Windows Server 2022 EC2 instance (`t3.small`,
   ~$15/mo, **not** free-tier), optionally promoted to an AD forest for
-  testing LDAP integration; publishes admin/LDAP-bind creds to SSM.
+  testing LDAP integration; publishes admin/LDAP-bind creds to
+  `/devops/terraform-created/domain-controller/...`.
 - **`cloudflare`** — the Cloudflare zone, DNS CNAME records per subdomain,
   and the Access policy; read-only lookups of the tunnel and Origin CA cert.
-- **`devtools-secrets`** — the shared `/devops/terraform-created/admin/password` every devtool
-  uses as its initial admin password, plus the shared RHBK OIDC client
+- **`devtools-secrets`** — the shared `/devops/terraform-created/admin/password`
+  every devtool uses as its initial admin password (sourced from the same
+  prerequisite generic password as `rds`), plus the shared RHBK OIDC client
   secret.
-- **`minikube`** — the real bootstrap, and the slow one (~15-20 min):
-    1. Boots an EC2 instance from the custom AMI, mounts the data volume,
-       installs a `minikube.service` systemd unit so the cluster survives the
-       nightly auto-stop.
-    2. Installs ArgoCD via Helm inside Minikube (`ClusterIP`, `--insecure` —
-       TLS terminates at Cloudflare).
-    3. Registers the `clusters-applicationset` app-of-apps, which
+- **`backup`** — an AWS Backup vault + daily plan covering the RDS instance
+  and any resource tagged `BackupManaged=true` (currently the EFS
+  shared-home filesystem), with a cross-region copy action to a second vault
+  in `us-east-1` — a regional incident, or anything with the same broad
+  reach as whatever caused an incident in the primary region, can't touch a
+  copy that already landed in a second region.
+- **`eks`** — the real bootstrap, and the slow one:
+    1. Creates a multi-node, multi-AZ EKS cluster
+       (`terraform-aws-modules/eks/aws`) in the existing `spokeSubnet1`/
+       `spokeSubnet2` pair — no new NAT/VPC resource, their existing
+       `0.0.0.0/0` route already goes through a pre-existing shared VPC
+       endpoint. No custom AMI to build or look up — EKS resolves the
+       standard EKS-optimized AL2023 AMI itself for both Managed Node Groups
+       (`devtools`: general-purpose, spans both AZs; `devtools-large`: a
+       dedicated lane sized for Confluence's 4-core CPU request, which the
+       primary group's smallest instance type can never satisfy). Both node
+       groups' IAM roles carry `AmazonSSMManagedInstanceCore`, so any node
+       is reachable via AWS Systems Manager Session Manager — no SSH, no
+       bastion, no key pair to manage.
+    2. Installs the `gp3` (EBS, `reclaimPolicy: Delete`, node-local volumes)
+       and `efs-sc` (EFS, `reclaimPolicy: Retain`, `ReadWriteMany`) storage
+       classes, and provisions the EFS filesystem `efs-sc` points at —
+       shared-home storage for Bitbucket/Jira/Confluence, matching
+       Atlassian's own Data Center `SHARED_STORAGE` pattern.
+    3. Installs ArgoCD via Helm (`ClusterIP`, `--insecure` — TLS terminates
+       at Cloudflare) using this module's own `helm`/`kubectl` Terraform
+       providers — no bash `user_data` script.
+    4. Registers the `clusters-applicationset` app-of-apps, which
        **auto-discovers every chart under `clusters-provision/clusters/*`**
        and auto-syncs it with the matching overrides from
        `clusters-definition` — `ingress-nginx`, `cloudflared`,
        `external-secrets-operator` all get created this way, with no manual
        `helm install`/`kubectl apply`. The unit blocks here until all three
        report Synced+Healthy.
-    4. Registers the `devtools-applicationset` app-of-apps last, which the
+    5. Registers the `devtools-applicationset` app-of-apps last, which the
        same way **auto-discovers every chart under
        `devtools-provision/devtools/*`** and auto-syncs it against
        `devtools-definition` — Jira, Bitbucket, Confluence, Artifactory,
@@ -113,17 +152,24 @@ beforehand to avoid juggling simultaneous prompts.
        continuously reconciles everything else itself** — Terraform never
        touches an individual cluster-infra tool or devtool, not even once.
 
-Once `minikube`'s apply finishes, ArgoCD is reachable at
+Once `eks`'s apply finishes, ArgoCD is reachable at
 `https://argocd.devopstashtiot.page` — user `admin`, password is the shared
 value at `/devops/terraform-created/admin/password` in SSM Parameter Store — and every
 devtool Application should show up Syncing/Healthy over the following few
 minutes as ArgoCD works through `devtools-applicationset`.
 
-## 3. Post-installation configuration for the devtools
+## 4. Post-installation configuration for the devtools
 
 ArgoCD deploying a devtool's Helm release only gets it running — a few
 things per tool aren't GitOps-managed and need a manual, one-time pass once
-the pod is up. These live in [`post-devtools-implementation/`](post-devtools-implementation/jira/README.md):
+the pod is up. These live in [`post-devtools-implementation/`](post-devtools-implementation/jira/README.md).
+
+!!! note "Admin passwords, licenses, and LDAP connection details all come from SSM"
+    None of these are typed into a wizard from memory or invented on the
+    spot — every one of them lives in SSM Parameter Store, sourced either
+    from the prerequisite parameters in section 2 above or from a
+    `/devops/terraform-created/...` path Terraform publishes automatically.
+    Each tool's page below gives the exact parameter name.
 
 | Tool | Covers |
 |---|---|

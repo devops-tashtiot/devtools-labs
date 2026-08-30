@@ -16,6 +16,13 @@ initial deploy. Create the first sysadmin account with the shared admin
 password (`/devops/terraform-created/admin/password`), same as every other devtool on this
 platform.
 
+The license itself is not something to type in from a physical key — it's
+sourced from `/devops/prerequisite/confluence/license` (set this before
+first deploy; see `devtools-labs/docs/bootstrap.md`) via an `ExternalSecret`
+(`devtools-provision/devtools/confluence/values.yaml`'s
+`licenseSsmParameter`) and applied automatically, so the wizard's license
+step should already be satisfied when you reach it.
+
 ---
 
 ## 2. User Directory (LDAP/AD)

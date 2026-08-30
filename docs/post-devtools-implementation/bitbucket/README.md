@@ -7,6 +7,16 @@ release, these manual steps remain before it's fully usable:
 2. **SSO (RHBK/OIDC)** — optional, on top of the directory above
 3. **API Token for devops-api** — required for `devops-api`'s Git integration
 
+No setup-wizard step is listed here because, unlike Jira/Confluence,
+Bitbucket's license and first admin account are both fully automated: the
+license comes from `/devops/prerequisite/bitbucket/license` (set this before
+first deploy; see `devtools-labs/docs/bootstrap.md`) via an `ExternalSecret`
+into `bitbucket.license.secretName`/`secretKey`
+(`devtools-provision/devtools/bitbucket/values.yaml`), and the admin account
+is created with the shared admin password
+(`/devops/terraform-created/admin/password`) — nothing to do in a browser
+wizard for either.
+
 ---
 
 ## 1. User Directory (LDAP/AD)
