@@ -96,11 +96,29 @@ today), with a cross-region copy action landing a second copy in
 `us-east-1` — independent of whatever caused an incident in the primary
 region.
 
-## What a human sets before any of this can run
+## Pre-deployment actions — what a human sets up before any of this can run
 
-A handful of SSM Parameter Store values are prerequisites, not generated —
-see [Bootstrap from scratch → Prerequisite](bootstrap.md#2-prerequisite-ssm-parameters-you-set-by-hand)
-for the exact list and how to set each one.
+Two categories of manual setup have to exist before the first `terragrunt apply`, neither of
+which Terraform can create for you:
+
+1. **Prerequisite SSM parameters** — a handful of SSM Parameter Store values Terraform reads as
+   data sources rather than generating itself: the shared admin/DB password, each Atlassian
+   product's license key, and the Cloudflare tunnel credentials. See the
+   [SSM Parameter Reference](ssm-parameters.md) for the complete list across every category
+   (prerequisite, terraform-created, postdeploy), or
+   [Bootstrap from scratch → Prerequisite](bootstrap.md#2-prerequisite-ssm-parameters-you-set-by-hand)
+   for exactly how to set each one.
+2. **Cloudflare setup** — a real, active Cloudflare zone, a Tunnel, and an Access Application all
+   have to exist first; none of this is Terraform-managed (Route53 is blocked wholesale in this
+   AWS account regardless — see [SCP Limitations](https://devops-tashtiot.github.io/docs/aws/scp-limitations/)
+   — so DNS/domain setup was never going to come from the AWS side). See
+   [Cloudflare/CoreDNS routing](architecture.md) (see its "Prerequisite Cloudflare setup"
+   section) for the exact steps, including the `allowed_idps` gotcha and where the tunnel
+   credential actually lands in SSM.
+
+After the cluster is up, a third category (`postdeploy`) covers per-devtool manual steps like API
+tokens and OAuth client secrets — see [Post-deployment setup](post-devtools-implementation/jira/README.md)
+and the same [SSM Parameter Reference](ssm-parameters.md) for those.
 
 ## What's NOT Terraform's job
 

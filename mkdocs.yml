@@ -53,6 +53,7 @@ nav:
       - Overview: overview.md
       - Cloudflare/CoreDNS routing: architecture.md
       - Cloudflare limitations & gotchas: cloudflare-limitations.md
+      - SSM Parameter Reference: ssm-parameters.md
   - Post-deployment setup:
       - Jira: post-devtools-implementation/jira/README.md
       - Confluence: post-devtools-implementation/confluence/README.md

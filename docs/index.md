@@ -37,6 +37,7 @@ infra) is deployed and managed by ArgoCD itself, via the sibling
 | See the full resource map (EKS, RDS, EFS, backup, ...) | [Architecture overview](overview.md) |
 | Understand how Cloudflare/CoreDNS route traffic into the cluster | [Cloudflare/CoreDNS routing](architecture.md) |
 | Check Cloudflare's known limitations/gotchas before debugging | [Cloudflare limitations & gotchas](cloudflare-limitations.md) |
+| Look up any SSM parameter — who creates it, who reads it | [SSM Parameter Reference](ssm-parameters.md) |
 | Configure Jira's LDAP directory + SSO | [Post-deployment: Jira](post-devtools-implementation/jira/README.md) |
 | Configure Confluence's LDAP directory + SSO | [Post-deployment: Confluence](post-devtools-implementation/confluence/README.md) |
 | Configure Bitbucket's LDAP directory + SSO + API token | [Post-deployment: Bitbucket](post-devtools-implementation/bitbucket/README.md) |
