@@ -106,13 +106,49 @@ authenticate, via a one-time code sent by email (no separate credential to
 manage). This is enforced entirely at Cloudflare's edge, before a request
 ever reaches the tunnel — the cluster itself has no idea Access exists.
 
-## What's not covered here
+## Prerequisite Cloudflare setup — what has to exist before any of this works
 
-This page is scoped to the network path — Cloudflare Access, the
-tunnel, and the DNS-rewrite split. It does not cover: how the Tunnel
-credential itself gets provisioned (a one-time `cloudflared tunnel create`,
-stored in SSM at `/devops/prerequisite/cloudflare/tunnel-credentials` and
-pulled in via an `ExternalSecret`), Cloudflare Access service tokens used
+Everything above assumes a Cloudflare zone, tunnel, and Access app already
+exist. None of that is created by `terraform/modules/eks` or by ArgoCD —
+it's set up once, by hand, before the first apply:
+
+1. **Domain on Cloudflare** — the zone must already be active (nameservers
+   pointed at Cloudflare) before anything else here works.
+2. **A Cloudflare Tunnel** — created once via `cloudflared tunnel create
+   <name>` from an authenticated `cloudflared` CLI. This generates a
+   tunnel ID and a credentials JSON file. That file's contents go into SSM
+   at `/devops/prerequisite/cloudflare/tunnel-credentials` — the in-cluster
+   `cloudflared` Deployment reads it from there via an `ExternalSecret`, it
+   never touches a local credentials file.
+3. **DNS records per subdomain** — a `CNAME` for each hostname (or a
+   wildcard), pointing at `<tunnel-id>.cfargotunnel.com`, proxied
+   (orange-cloud) so Cloudflare's edge actually terminates the connection
+   instead of routing straight to an IP.
+4. **Cloudflare Access (Zero Trust)** — an Identity Provider (a one-time
+   email code login type) plus an Access Application covering
+   `*.devopstashtiot.page`, with an email-allowlist policy. The
+   Application's `allowed_idps` field **must** explicitly reference that
+   IDP — leaving it unset makes Access silently fall back to its default
+   (account-members-only) IDP, which blocks every allowlisted email with
+   no trace in the Access logs, since the fallback happens before the
+   email policy is ever evaluated.
+5. **Origin CA certificate** — issued through Cloudflare's own Origin CA
+   API, not a publicly-trusted CA (it's only meant to be trusted between
+   Cloudflare's edge and an origin server — see
+   [Cloudflare limitations & gotchas](cloudflare-limitations.md) for what
+   trusting it actually requires from every devtool). This is what lets
+   `cloudflared` connect to `ingress-nginx` over real HTTPS instead of
+   plain HTTP. The cert and key are published to SSM and mounted into
+   `ingress-nginx` as a TLS secret.
+
+Steps 2 and 5 land their outputs in SSM Parameter Store specifically so
+the cluster can consume them read-only — `devtools-labs/terraform/modules/
+cloudflare` looks most of this up as a `data` source rather than owning
+its lifecycle as a managed `resource` (see that module's `main.tf`).
+Rotating the tunnel credentials or the Origin CA cert later means redoing
+the relevant step above and re-publishing to the same SSM path — Terraform
+doesn't generate or rotate either one itself.
+
+**Still not covered by this page**: Cloudflare Access service tokens used
 for non-interactive access (e.g. pushing to Bitbucket from outside the
-cluster), or the Origin CA certificate's own issuance/rotation. See the
-parent `CLAUDE.md`'s Cloudflare section for those.
+cluster) — see the parent `CLAUDE.md`'s Cloudflare section for that.
