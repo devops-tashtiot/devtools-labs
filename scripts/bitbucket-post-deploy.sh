@@ -125,10 +125,11 @@ CONNECTION SETTINGS
                   Base DN would make that user permanently invisible to
                   Bitbucket (LDAP subtree search only reaches down from
                   the Base DN, never sideways). The domain root has no
-                  such blind spot. The tradeoff is that AD's own built-in
+                  such blind spot. Accepted tradeoff: AD's own built-in
                   accounts (Administrator, Guest, krbtgt) are now also in
-                  scope — handled below by tightening the User Object
-                  Filter instead, not by narrowing this DN back down.
+                  scope and will show up as syncable users — the User
+                  Object Filter below is intentionally left broad rather
+                  than excluding them.
 
 Click "Test Connection" here before moving on — if it fails, it's almost
 always the Hostname/Port/Username/Password above, not anything further
@@ -138,12 +139,7 @@ down this form.
 ADVANCED SETTINGS -> SCHEMA MAPPING -> USER SCHEMA
 --------------------------------------------------------------------------
   User Object Class           :  user
-  User Object Filter          :  (&(objectCategory=Person)(sAMAccountName=*)(!(sAMAccountName=Administrator))(!(sAMAccountName=Guest))(!(sAMAccountName=krbtgt)))
-               -> The three (!(sAMAccountName=...)) clauses exclude AD's
-                  own built-in accounts, which are now in search scope
-                  because the Base DN above is the domain root rather
-                  than an OU. Without these, Administrator/Guest/krbtgt
-                  would show up as syncable Bitbucket users.
+  User Object Filter          :  (sAMAccountName=*)
   User Name Attribute         :  sAMAccountName
   User Name RDN Attribute     :  cn
   User First Name Attribute   :  givenName
