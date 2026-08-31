@@ -59,12 +59,10 @@ prompting for them or generating them itself. Set each with
 | Parameter | Used by | Notes |
 |---|---|---|
 | `/devops/prerequisite/generic-password` | `rds` (master DB password) and `devtools-secrets` (shared devtools admin password) | One value, deliberately shared — this platform doesn't need separate credentials per resource. Both modules read the same parameter via a `data "aws_ssm_parameter"` lookup; neither owns its lifecycle. |
-| `/devops/prerequisite/bitbucket/license` | Bitbucket's Helm release (`licenseSsmParameter`) | Get this from your Atlassian license/trial account. |
-| `/devops/prerequisite/confluence/license` | Confluence's Helm release (`licenseSsmParameter`) | Same as above. |
-
-Jira has no equivalent license parameter in this platform — its license is
-entered by hand in the setup wizard (see
-[`post-devtools-implementation/jira`](post-devtools-implementation/jira/README.md)).
+| `/devops/prerequisite/bitbucket/license` | Bitbucket's Helm release (`licenseSsmParameter`) | Get this from your Atlassian license/trial account. Auto-applied via an ExternalSecret — the chart supports this natively. |
+| `/devops/prerequisite/confluence/license` | Confluence's Helm release (`licenseSsmParameter`) | Same as above — auto-applied. |
+| `/devops/prerequisite/jira/license` | Read manually during Jira's first-run setup wizard | Jira's chart has **no** auto-apply mechanism for a license or sysadmin account (confirmed against the upstream chart + Atlassian docs — no equivalent of Bitbucket's `licenseSsmParameter` wiring exists for Jira), so this value is never read by Terraform, Helm, or an ExternalSecret — only by a human, via `aws ssm get-parameter --name /devops/prerequisite/jira/license --with-decryption`, pasted into the browser wizard. See [`post-devtools-implementation/jira`](post-devtools-implementation/jira/README.md). |
+| `/devops/prerequisite/cloudflare/tunnel-credentials` | `cloudflared`'s ExternalSecret (`tunnelCredentialsSsmParameter` in `clusters-definition/clusters/cloudflared/values.yaml`) | The one-time output of `cloudflared tunnel create <name>` (a JSON file at `~/.cloudflared/<tunnel-id>.json`) — `aws ssm put-parameter --name /devops/prerequisite/cloudflare/tunnel-credentials --type SecureString --value "$(cat ~/.cloudflared/<tunnel-id>.json)"`. This one matters for `terragrunt apply` to actually finish, not just for a devtool to work afterward: the `eks` unit's apply blocks on `clusters-applicationset` reaching Healthy, and `cloudflared` (part of that first wave) can never start without it — set this **before** running `terragrunt apply`, not after. |
 
 `domain-controller`'s `admin_password`/`ldap_bind_password` are **not** part
 of this prerequisite-SSM pattern — they stay as interactive `TF_VAR_*`
