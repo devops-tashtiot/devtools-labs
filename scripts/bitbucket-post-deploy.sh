@@ -159,9 +159,23 @@ Navigate to:
     Administration  ->  Security  ->  Single sign-on
 
 This is Bitbucket's own built-in Data Center SSO screen (not an
-Atlassian Marketplace app) — it should already show an RHBK/OIDC client
-pre-configured with the correct Redirect URI. You only need to fill in
-the secret and the mapping field:
+Atlassian Marketplace app). Fill in:
+
+  Client ID     :  bitbucket
+               -> Static, not a secret — matches bitbucketClient.clientId
+                  in clusters-definition/clusters/rhbk/values.yaml.
+
+  Issuer URL    :  https://rhbk.devopstashtiot.page/realms/devtools
+               -> Standard Keycloak issuer format: <RHBK base URL>/realms/<realm>.
+                  Realm name is "devtools" (clusters-provision/clusters/rhbk/
+                  values.yaml's realm.name) — every devtool on this platform
+                  federates through this same realm.
+
+  Login text    :  Log in with RHBK
+               -> The button text shown on Bitbucket's login page. Matches
+                  the same wording already used for Jira/Confluence's SSO
+                  buttons — keep it consistent rather than inventing new
+                  copy per devtool.
 
   Client Secret :  ${OIDC_SECRET}
                -> Shared by all six RHBK OIDC clients on this platform.
