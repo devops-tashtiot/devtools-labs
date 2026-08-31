@@ -63,12 +63,15 @@ devtools connect to as external storage, each provisioning its own
 database/role via an init container. Master credentials are published to
 SSM for those init containers to read.
 
-### `domain-controller` — LDAP for SSO/directory testing
+### `domain-controller` — the source of truth for every SSO user/group
 
-A Windows Server 2022 EC2 instance (not free-tier, ~$15/mo), optionally
-promoted to an Active Directory forest, for testing LDAP directory
-integration against Jira/Bitbucket/Confluence. Publishes admin/LDAP-bind
-credentials to SSM.
+A Windows Server 2022 EC2 instance (not free-tier, ~$15/mo), promoted to
+an Active Directory forest, for LDAP directory integration against
+Jira/Bitbucket/Confluence. This AD forest is the **source of truth for
+every user and group in the platform's SSO** — not a standalone testing
+fixture, and not itself the identity provider users authenticate against
+(that's RHBK, via OIDC), but where every account and group RHBK federates
+actually comes from. Publishes admin/LDAP-bind credentials to SSM.
 
 ### `cloudflare` — DNS, tunnel routing, Access, and the Origin CA
 
