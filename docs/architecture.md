@@ -93,18 +93,10 @@ subdomain (routed to `argocd-server` directly rather than through
 ingress-nginx, since no Ingress rule exists for arbitrary ArgoCD
 subdomains).
 
-**How the rewrite is actually applied** — worth calling out since two
-other approaches were tried first and didn't hold up: injected via the
-`coredns` EKS addon's own `configuration_values.corefile` field, not a
-direct ConfigMap edit. A `coredns-custom` ConfigMap + `import` extension
-point was tried first — it doesn't exist on this EKS addon version
-(confirmed live: the default Corefile has no such import, and the CoreDNS
-Deployment only mounts the main ConfigMap's own key). A direct patch of the
-addon-owned ConfigMap was tried next — it works, but the addon controller
-can revert it on its own reconciliation/upgrade pass, since Terraform
-doesn't own that ConfigMap as a resource. Setting it via the addon's own
-supported configuration input survives addon upgrades and needs no
-separate restart step.
+**How the rewrite is actually applied**: injected via the `coredns` EKS
+addon's own `configuration_values.corefile` field, not a direct ConfigMap
+edit — this is the addon's own supported configuration input, so it
+survives addon upgrades/reconciliation and needs no separate restart step.
 
 ## Cloudflare Access
 
