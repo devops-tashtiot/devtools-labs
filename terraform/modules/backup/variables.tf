@@ -28,6 +28,12 @@ variable "dr_vault_name" {
   default     = "devtools-backup-vault-dr"
 }
 
+variable "dr_retention_days" {
+  description = "Days the cross-region copy in dr_region is retained before deletion — independent of (and shorter than) retention_days, since the DR copy only needs to survive long enough to matter for a regional-incident scenario, not serve as the primary retention window."
+  type        = number
+  default     = 1
+}
+
 variable "rds_instance_arn" {
   description = "ARN of the RDS instance to back up via AWS Backup's native RDS support (produces a consistent DB snapshot through the Backup service, tracked in this vault instead of RDS's own disconnected snapshot list)."
   type        = string

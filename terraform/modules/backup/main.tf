@@ -78,7 +78,7 @@ resource "aws_backup_plan" "this" {
       destination_vault_arn = aws_backup_vault.dr.arn
 
       lifecycle {
-        delete_after = var.retention_days
+        delete_after = var.dr_retention_days
       }
     }
   }
