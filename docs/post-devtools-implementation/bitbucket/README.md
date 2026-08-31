@@ -207,7 +207,23 @@ ExternalSecret (see `devtools-definition/devtools/devops-api/values.yaml`'s
 `vault.secrets`) — distinct from the AD/LDAP bind credentials used for the
 `BITBUCKET_USERNAME`/`BITBUCKET_PASSWORD` fields elsewhere in that same file.
 
-This token isn't created automatically. Generate a Bitbucket Personal Access
+This token isn't created automatically. `scripts/bitbucket-post-deploy.sh` in
+this repo automates both the token creation and the SSM publish below via
+Bitbucket's access-tokens REST API — but that call needs Basic Authentication
+enabled on this instance first, which is **off by default** on a fresh
+Bitbucket DC install (confirmed by direct probe: it returns `403
+"Basic Authentication has been disabled on this instance."` until enabled).
+One-time fix, in the browser:
+```
+Administration → Accounts → Authentication methods
+  → next to the default method: Actions → Edit
+  → check "Allow basic authentication on API calls"
+  → Save configuration
+```
+This same setting also gates the laptop `git push` pattern documented in the
+parent `CLAUDE.md`'s Cloudflare section (Gotcha 3).
+
+To do it by hand instead, generate a Bitbucket Personal Access
 Token (Administration → Personal access tokens — either your own or a
 dedicated service account's, scoped with repo read/write access), then
 publish it:

@@ -267,26 +267,23 @@ REST API on the platform's behalf (this is separate from the
 BITBUCKET_USERNAME/BITBUCKET_PASSWORD fields devops-api also uses, which
 are the AD/LDAP bind credentials — this token is a distinct credential).
 
-If Basic Authentication is enabled on this instance, saying yes below
-will fully automate this: call Bitbucket's own access-tokens REST API
-as user '${BITBUCKET_ADMIN_USER}' to create (or, if one already exists
-with this exact name, silently rotate/replace) a token named
-"${TOKEN_NAME}" scoped to: ${TOKEN_PERMISSIONS} — then publish it straight
-to SSM at ${TOKEN_SSM_PARAM}.
+Saying yes below calls Bitbucket's own access-tokens REST API as user
+'${BITBUCKET_ADMIN_USER}' to create (or, if one already exists with this
+exact name, silently rotate/replace) a token named "${TOKEN_NAME}" scoped
+to: ${TOKEN_PERMISSIONS} — then publishes it straight to SSM at
+${TOKEN_SSM_PARAM}.
 
-KNOWN GOTCHA ON THIS PLATFORM: this Bitbucket instance has Basic
-Authentication disabled instance-wide (Administration > Security) —
-confirmed by direct probe, not assumed. That setting blocks BOTH the
-REST API call above AND plain "https://user:pass@host" git pushes
-(this repo's own CLAUDE.md documents that git-push pattern, which is
-currently broken by the same setting — worth fixing separately).
-Bearer/PAT auth is a genuinely different, still-open path (confirmed:
-an invalid Bearer token gets a normal 401, not the Basic-Auth-blocked
-403) — but creating the very first token needs SOME existing
-credential, and with Basic Auth off and no token created yet, there is
-no way to bootstrap the first one via API. If this script's automated
-attempt below fails with "Basic Authentication has been disabled", it
-will fall back to walking you through creating that one token by hand.
+PREREQUISITE — Basic Authentication must be enabled on this instance
+first, or this call fails with 403 "Basic Authentication has been
+disabled on this instance." (confirmed by direct probe; it's off by
+default on a fresh Bitbucket DC install, not something this platform
+turned off deliberately). One-time fix, in the browser:
+    Administration -> Accounts -> Authentication methods
+      -> next to the default method: Actions -> Edit
+      -> check "Allow basic authentication on API calls"
+      -> Save configuration
+Same setting the parent CLAUDE.md's Gotcha 3 documents — also required
+for the laptop \`git push\` pattern documented there.
 EOF
 echo
 read -r -p "Attempt to create/rotate the '${TOKEN_NAME}' access token now? [y/N] " CONFIRM
@@ -322,23 +319,17 @@ if [ -z "$TOKEN" ]; then
   if echo "$RESPONSE" | grep -q "Basic Authentication has been disabled"; then
     cat <<EOF
 
-Confirmed: Basic Authentication is disabled on this instance, so this
-step can't be automated end-to-end. There's no way around this from
-outside — the first token has to be created in the browser, once:
+FAILED: Basic Authentication is disabled on this instance. Enable it
+first, then re-run this script:
 
     1. Log in at ${BITBUCKET_URL} as '${BITBUCKET_ADMIN_USER}'
        (password: the shared admin password, /devops/terraform-created/admin/password)
-    2. Go to: Administration -> Personal access tokens -> Create token
-    3. Name it "${TOKEN_NAME}", grant: ${TOKEN_PERMISSIONS} (repository read/write)
-    4. Copy the token value — Bitbucket only shows it once
+    2. Administration -> Accounts -> Authentication methods
+    3. Next to the default method: Actions -> Edit
+    4. Check "Allow basic authentication on API calls"
+    5. Save configuration
 EOF
-    echo
-    read -r -s -p "Paste that token value here (input hidden), then Enter: " TOKEN
-    echo
-    if [ -z "$TOKEN" ]; then
-      echo "No token entered — nothing published. Re-run this script when you have it."
-      exit 1
-    fi
+    exit 1
   else
     echo
     echo "FAILED to create the token. Bitbucket's raw response was:"
