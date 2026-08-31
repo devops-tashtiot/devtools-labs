@@ -73,7 +73,7 @@ field names below match Jira's directory config almost exactly — see
 | Use SSL | **No** | matches the plain `ldap://` scheme above |
 | Username | the bind account's UPN, `<bind-username>@devtools.local` (username from `/devops/terraform-created/domain-controller/ldap-bind-username`) | same bind account RHBK's `set-ldap-credentials-job.yaml` uses |
 | Password | fetch with `aws ssm get-parameter --name /devops/terraform-created/domain-controller/ldap-bind-password --with-decryption` | never commit this value anywhere |
-| Base DN | `OU=devops-tashtiot,DC=devtools,DC=local` | from `domain-controller`'s `ou_name`/`domain_name` variables |
+| Base DN | `DC=devtools,DC=local` (domain root — published to SSM at `/devops/terraform-created/domain-controller/base-dn`) | **Deliberately not** the OU-scoped `OU=devops-tashtiot,DC=devtools,DC=local` — everything the domain controller creates today lives inside that one OU, but a real AD user created elsewhere in the domain later would be permanently invisible to Confluence if the Base DN stayed OU-scoped (subtree search only reaches down from the Base DN, never sideways). The tradeoff — AD's own built-in accounts also come into scope — is handled by the User Object Filter below, not by narrowing this DN. |
 
 > **Hostname must be an IP, not `devtools.local`:** there is no DNS zone for
 > the AD domain configured anywhere in this platform (no CoreDNS stub domain,
@@ -92,7 +92,7 @@ Confluence's UI don't always make the AD equivalent obvious.
 | Field | Value |
 |---|---|
 | User Object Class | `user` |
-| User Object Filter | `(&(objectCategory=Person)(sAMAccountName=*))` |
+| User Object Filter | `(&(objectCategory=Person)(sAMAccountName=*)(!(sAMAccountName=Administrator))(!(sAMAccountName=Guest))(!(sAMAccountName=krbtgt)))` — the three `(!(sAMAccountName=...))` clauses exclude AD's built-in accounts, which are in search scope now that Base DN is the domain root |
 | User Name Attribute | `sAMAccountName` |
 | User Name RDN Attribute | `cn` |
 | User First Name Attribute | `givenName` |

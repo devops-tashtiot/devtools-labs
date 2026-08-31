@@ -105,6 +105,12 @@ variable "ldap_bind_username_ssm_parameter" {
   default     = "/devops/terraform-created/domain-controller/ldap-bind-username"
 }
 
+variable "base_dn_ssm_parameter" {
+  description = "SSM Parameter Store path (plain String, not a secret) holding the domain-root LDAP Base DN (no OU component) — see aws_ssm_parameter.base_dn in main.tf for why this is the domain root rather than the OU-scoped value."
+  type        = string
+  default     = "/devops/terraform-created/domain-controller/base-dn"
+}
+
 variable "sample_user_username" {
   description = "sAMAccountName for a sample end-user account, for testing Bitbucket LDAP login."
   type        = string

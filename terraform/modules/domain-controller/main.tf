@@ -161,3 +161,24 @@ resource "aws_ssm_parameter" "ldap_bind_username" {
 # reads admin_password_ssm_parameter directly (see
 # clusters-definition/clusters/rhbk/values.yaml's ldap.passwordSsmParameter)
 # instead of a redundant second copy.
+
+# Domain-root Base DN only (DC=...,DC=... — no OU component), published so
+# every LDAP consumer (Bitbucket/Jira/Confluence's manual directory config,
+# RHBK's usersDn) can source the same value instead of each hardcoding it.
+# Deliberately NOT the OU-scoped bitbucket_ou_dn output: everything this
+# module creates today lives inside that one OU, but nothing stops a real
+# AD user from being created elsewhere in the domain later — an OU-scoped
+# Base DN would make that user permanently invisible to every devtool on
+# this platform (subtree search only reaches down from the Base DN, never
+# sideways). The domain root has no such blind spot. The tradeoff — AD's
+# own built-in accounts (Administrator, Guest, krbtgt) also become visible
+# to the same search — is handled by excluding them in each consumer's
+# User Object Filter instead, not by narrowing the Base DN.
+resource "aws_ssm_parameter" "base_dn" {
+  count       = var.instance_enabled ? 1 : 0
+  name        = var.base_dn_ssm_parameter
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Domain-root LDAP Base DN (no OU component) for every LDAP directory consumer on this platform (Bitbucket/Jira/Confluence manual config, RHBK's usersDn). Deliberately the domain root, not the OU-scoped value the module's other objects live in — see this resource's comment in main.tf for why."
+  type        = "String"
+  value       = local.base_dn
+  tags        = local.ssm_tags
+}

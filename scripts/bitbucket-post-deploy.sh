@@ -60,6 +60,10 @@ LDAP_BIND_USER=$(ssm_get /devops/terraform-created/domain-controller/ldap-bind-u
 LDAP_BIND_PASS=$(ssm_get /devops/terraform-created/domain-controller/admin-password)
 ADMIN_PASS=$(ssm_get /devops/terraform-created/admin/password)
 OIDC_SECRET=$(ssm_get /devops/terraform-created/rhbk/oidc-client-secret)
+# Domain root (no OU component) — see terraform/modules/domain-controller's
+# aws_ssm_parameter.base_dn for why this is deliberately not the narrower
+# OU-scoped DN.
+BASE_DN=$(ssm_get /devops/terraform-created/domain-controller/base-dn)
 
 LDAP_HOST="${LDAP_URL#ldap://}"
 LDAP_HOST="${LDAP_HOST%%:*}"
@@ -113,10 +117,18 @@ CONNECTION SETTINGS
                   password (they were consolidated onto one shared value)
                   — treat it accordingly.
 
-  Base DN    :  OU=devops-tashtiot,DC=devtools,DC=local
-               -> The single organizational unit every platform user and
-                  group lives under. There's nothing outside this OU to
-                  search, so this is the narrowest correct value.
+  Base DN    :  ${BASE_DN}
+               -> The domain root, not an OU-scoped DN. Deliberate: every
+                  object the domain controller creates today lives inside
+                  one specific OU, but nothing stops a real AD user being
+                  created elsewhere in the domain later — an OU-scoped
+                  Base DN would make that user permanently invisible to
+                  Bitbucket (LDAP subtree search only reaches down from
+                  the Base DN, never sideways). The domain root has no
+                  such blind spot. The tradeoff is that AD's own built-in
+                  accounts (Administrator, Guest, krbtgt) are now also in
+                  scope — handled below by tightening the User Object
+                  Filter instead, not by narrowing this DN back down.
 
 Click "Test Connection" here before moving on — if it fails, it's almost
 always the Hostname/Port/Username/Password above, not anything further
@@ -126,7 +138,12 @@ down this form.
 ADVANCED SETTINGS -> SCHEMA MAPPING -> USER SCHEMA
 --------------------------------------------------------------------------
   User Object Class           :  user
-  User Object Filter          :  (&(objectCategory=Person)(sAMAccountName=*))
+  User Object Filter          :  (&(objectCategory=Person)(sAMAccountName=*)(!(sAMAccountName=Administrator))(!(sAMAccountName=Guest))(!(sAMAccountName=krbtgt)))
+               -> The three (!(sAMAccountName=...)) clauses exclude AD's
+                  own built-in accounts, which are now in search scope
+                  because the Base DN above is the domain root rather
+                  than an OU. Without these, Administrator/Guest/krbtgt
+                  would show up as syncable Bitbucket users.
   User Name Attribute         :  sAMAccountName
   User Name RDN Attribute     :  cn
   User First Name Attribute   :  givenName
