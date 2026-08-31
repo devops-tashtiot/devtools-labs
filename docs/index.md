@@ -1,12 +1,13 @@
 # devtools-labs
 
-Terraform + Terragrunt infra for the self-hosted devtools platform: a
-Minikube cluster with ArgoCD bootstrapped inside it, an RDS Postgres
-instance, and a standalone Windows AD domain controller. This is the only
-one of the platform's five repos that runs real infrastructure code — from
-the moment ArgoCD comes up, everything else (Jira, Bitbucket, Confluence,
-cluster-wide infra) is deployed and managed by ArgoCD itself, via the
-sibling `*-provision`/`*-definition` repos.
+Terraform + Terragrunt infra for the self-hosted devtools platform: a real
+multi-node/multi-AZ EKS cluster with ArgoCD bootstrapped inside it, an RDS
+Postgres instance, EFS shared storage, a standalone Windows AD domain
+controller, and cross-region AWS Backup. This is the only one of the
+platform's five repos that runs real infrastructure code — from the moment
+ArgoCD comes up, everything else (Jira, Bitbucket, Confluence, cluster-wide
+infra) is deployed and managed by ArgoCD itself, via the sibling
+`*-provision`/`*-definition` repos.
 
 <div class="grid cards" markdown>
 
@@ -27,7 +28,7 @@ sibling `*-provision`/`*-definition` repos.
 | You want to… | Go to |
 |---|---|
 | Stand up the whole platform on a fresh account | [Bootstrap from scratch](bootstrap.md) |
-| Rebuild the Minikube base AMI | [Bootstrap from scratch → Prerequisite](bootstrap.md#prerequisite-the-minikube-base-ami) |
+| Set the prerequisite SSM parameters before first apply | [Bootstrap from scratch → Prerequisite](bootstrap.md#2-prerequisite-ssm-parameters-you-set-by-hand) |
 | Configure Jira's LDAP directory + SSO | [Post-deployment: Jira](post-devtools-implementation/jira/README.md) |
 | Configure Confluence's LDAP directory + SSO | [Post-deployment: Confluence](post-devtools-implementation/confluence/README.md) |
 | Configure Bitbucket's LDAP directory + SSO + API token | [Post-deployment: Bitbucket](post-devtools-implementation/bitbucket/README.md) |
