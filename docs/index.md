@@ -21,6 +21,11 @@ infra) is deployed and managed by ArgoCD itself, via the sibling
     The manual, one-time steps per devtool that aren't GitOps-managed — LDAP
     directory config, SSO client secrets, API tokens.
 
+- :material-sitemap: **[Architecture overview](overview.md)**
+
+    What actually exists in AWS to bring the devtools platform up — the six
+    Terraform units, and what each one owns.
+
 </div>
 
 ## At a glance
@@ -29,7 +34,9 @@ infra) is deployed and managed by ArgoCD itself, via the sibling
 |---|---|
 | Stand up the whole platform on a fresh account | [Bootstrap from scratch](bootstrap.md) |
 | Set the prerequisite SSM parameters before first apply | [Bootstrap from scratch → Prerequisite](bootstrap.md#2-prerequisite-ssm-parameters-you-set-by-hand) |
-| Understand how Cloudflare/CoreDNS route traffic into the cluster | [Bootstrap from scratch → Cloudflare routing](bootstrap.md#4-how-cloudflare-routes-traffic-into-the-cluster) |
+| See the full resource map (EKS, RDS, EFS, backup, ...) | [Architecture overview](overview.md) |
+| Understand how Cloudflare/CoreDNS route traffic into the cluster | [Cloudflare/CoreDNS routing](architecture.md) |
+| Check Cloudflare's known limitations/gotchas before debugging | [Cloudflare limitations & gotchas](cloudflare-limitations.md) |
 | Configure Jira's LDAP directory + SSO | [Post-deployment: Jira](post-devtools-implementation/jira/README.md) |
 | Configure Confluence's LDAP directory + SSO | [Post-deployment: Confluence](post-devtools-implementation/confluence/README.md) |
 | Configure Bitbucket's LDAP directory + SSO + API token | [Post-deployment: Bitbucket](post-devtools-implementation/bitbucket/README.md) |

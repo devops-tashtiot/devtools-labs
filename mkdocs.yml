@@ -49,6 +49,10 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Bootstrap from scratch: bootstrap.md
+  - Architecture:
+      - Overview: overview.md
+      - Cloudflare/CoreDNS routing: architecture.md
+      - Cloudflare limitations & gotchas: cloudflare-limitations.md
   - Post-deployment setup:
       - Jira: post-devtools-implementation/jira/README.md
       - Confluence: post-devtools-implementation/confluence/README.md
