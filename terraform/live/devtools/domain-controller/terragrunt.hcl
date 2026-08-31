@@ -22,9 +22,9 @@ inputs = {
   domain_netbios_name       = "DEVTOOLS"
 
   # Not a secret — the literal value lives here rather than as a module
-  # default. admin_password and ldap_bind_password are deliberately omitted:
-  # both are sensitive with no default, so `terragrunt apply` prompts for
-  # them interactively every run (export TF_VAR_admin_password /
-  # TF_VAR_ldap_bind_password in your shell to avoid retyping them).
+  # default. admin_password/ldap_bind_password are no longer separate
+  # TF_VAR_* prompts — both now read from generic_password_ssm_parameter
+  # (default /devops/prerequisite/generic-password), the same shared
+  # prerequisite secret rds/devtools-secrets already use.
   admin_username = "Administrator"
 }

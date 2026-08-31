@@ -182,7 +182,7 @@ tasks:
           # stalling forever.
           if (Test-DomainControllerReady) {
               $ldapBindUsername = Get-SsmParameterValue -Name "${ldap_bind_username_ssm_parameter}"
-              $ldapBindPassword = Get-SsmParameterValue -Name "${ldap_bind_password_ssm_parameter}"
+              $ldapBindPassword = Get-SsmParameterValue -Name "${admin_password_ssm_parameter}"
 
               Initialize-BitbucketLdapObjects `
                   -DomainName "${domain_name}" `

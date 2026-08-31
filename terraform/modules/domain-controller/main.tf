@@ -9,6 +9,19 @@
 #   - No key pair required (optional, only for initial password decryption)
 # -----------------------------------------------------------------------------
 
+# Sources the DSRM/local-Administrator and LDAP-bind passwords from the same
+# shared prerequisite secret rds/devtools-secrets already use, instead of
+# separate interactive TF_VAR_* prompts — a deliberate reversal of this
+# module's earlier "keep these separate" stance (that stance was about not
+# letting a future rotation of a SHARED secret silently touch the DSRM/local
+# Administrator credential mid-AD-forest-lifecycle; reading the same value at
+# apply time doesn't carry that risk the way consolidating the SSM path
+# itself would have).
+data "aws_ssm_parameter" "generic_password" {
+  name            = var.generic_password_ssm_parameter
+  with_decryption = true
+}
+
 locals {
   base_dn = join(",", [for label in split(".", var.domain_name) : "DC=${label}"])
 
@@ -28,7 +41,6 @@ locals {
     admin_password_ssm_parameter     = var.admin_password_ssm_parameter
     ou_name                          = var.ou_name
     ldap_bind_username_ssm_parameter = var.ldap_bind_username_ssm_parameter
-    ldap_bind_password_ssm_parameter = var.ldap_bind_password_ssm_parameter
     sample_user_username             = var.sample_user_username
     sample_user_password             = var.sample_user_password
     ad_group_name                    = var.ad_group_name
@@ -58,7 +70,13 @@ resource "aws_instance" "windows" {
     delete_on_termination = true
     encrypted             = true
 
-    tags = { Name = "${var.hostname}-root" }
+    # BackupManaged=true is the tag terraform/modules/backup's
+    # aws_backup_selection already matches on (same tag the EFS
+    # shared-home filesystem uses) — this AD forest is the source of
+    # truth for every SSO user/group (see docs/overview.md), so its root
+    # volume gets the same daily-backup + cross-region-copy coverage as
+    # RDS and EFS if the instance is ever destroyed.
+    tags = { Name = "${var.hostname}-root", BackupManaged = "true" }
   }
 
   # IMDSv2 — enforced by Horizon SCP
@@ -123,9 +141,9 @@ resource "aws_ssm_parameter" "admin_username" {
 resource "aws_ssm_parameter" "admin_password" {
   count       = var.instance_enabled ? 1 : 0
   name        = var.admin_password_ssm_parameter
-  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Local Administrator/DSRM password, fetched at boot by ad-bootstrap.ps1.tftpl. To set/rotate: export TF_VAR_admin_password=<value> before running `terragrunt apply` in terraform/live/devtools/domain-controller (Terraform prompts interactively if not exported)."
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Local Administrator/DSRM password, fetched at boot by ad-bootstrap.ps1.tftpl. Value comes from the shared prerequisite secret at var.generic_password_ssm_parameter (default /devops/prerequisite/generic-password) — set that once before the first apply; no TF_VAR needed."
   type        = "SecureString"
-  value       = var.admin_password
+  value       = data.aws_ssm_parameter.generic_password.value
   tags        = local.ssm_tags
 }
 
@@ -138,11 +156,8 @@ resource "aws_ssm_parameter" "ldap_bind_username" {
   tags        = local.ssm_tags
 }
 
-resource "aws_ssm_parameter" "ldap_bind_password" {
-  count       = var.instance_enabled ? 1 : 0
-  name        = var.ldap_bind_password_ssm_parameter
-  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. LDAP bind service account password, fetched at boot by ad-bootstrap.ps1.tftpl and consumed by clusters-definition/clusters/rhbk/values.yaml (ldap.passwordSsmParameter). To set/rotate: export TF_VAR_ldap_bind_password=<value> before running `terragrunt apply` in terraform/live/devtools/domain-controller (Terraform prompts interactively if not exported)."
-  type        = "SecureString"
-  value       = var.ldap_bind_password
-  tags        = local.ssm_tags
-}
+# No separate ldap_bind_password SSM parameter — it would just hold the same
+# value as admin_password (both source from generic_password now), so RHBK
+# reads admin_password_ssm_parameter directly (see
+# clusters-definition/clusters/rhbk/values.yaml's ldap.passwordSsmParameter)
+# instead of a redundant second copy.
