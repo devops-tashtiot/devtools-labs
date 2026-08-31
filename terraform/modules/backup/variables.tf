@@ -59,5 +59,5 @@ variable "schedule_cron" {
 variable "retention_days" {
   description = "Days AWS Backup retains each recovery point before deleting it. This is a plain, unlocked retention window — see the module README/comments for how to add Vault Lock (compliance or governance mode) on top of this vault later."
   type        = number
-  default     = 7
+  default     = 3
 }

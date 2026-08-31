@@ -20,5 +20,5 @@ inputs = {
 
   rds_instance_arn = "arn:aws:rds:il-central-1:342831714456:db:${local.rds_identifier}"
 
-  retention_days = 7
+  retention_days = 3
 }
