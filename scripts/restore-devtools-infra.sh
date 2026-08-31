@@ -3,12 +3,14 @@ set -euo pipefail
 
 # Restores the devtools platform after a scale-down (manual, or the
 # after-hours-shutdown Lambda/RDS nightly-stop schedule):
-#   1. Scales both EKS managed node groups back to their
-#      Terraform-configured min/max/desired (read live from
+#   1. Restores both EKS managed node groups' desiredSize to their
+#      Terraform-configured value (read live from
 #      terraform/live/devtools/eks/terragrunt.hcl, falling back to
-#      terraform/modules/eks/variables.tf's defaults for anything not
-#      overridden there — so this script can't drift from what
-#      `terragrunt apply` would set).
+#      terraform/modules/eks/variables.tf's default if not overridden
+#      there — so this script can't drift from what `terragrunt apply`
+#      would set). min/max are deliberately left untouched — only
+#      desiredSize is restored, since scaling-config accepts a partial
+#      update and min/max aren't what an after-hours shutdown changes.
 #   2. Starts the Windows AD domain controller EC2 instance (RHBK's LDAP
 #      federation and Bitbucket's user directory both depend on it).
 #   3. Starts the RDS instance every devtool's database depends on.
@@ -39,16 +41,12 @@ hcl_int() {
   echo "$val"
 }
 
-NODE_MIN=$(hcl_int node_min_size)
-NODE_MAX=$(hcl_int node_max_size)
 NODE_DESIRED=$(hcl_int node_desired_size)
-LARGE_MIN=$(hcl_int node_large_min_size)
-LARGE_MAX=$(hcl_int node_large_max_size)
 LARGE_DESIRED=$(hcl_int node_large_desired_size)
 
-echo "== 1/3 Restoring EKS node groups to Terraform-configured sizes =="
-echo "   devtools:       min=$NODE_MIN max=$NODE_MAX desired=$NODE_DESIRED"
-echo "   devtools-large: min=$LARGE_MIN max=$LARGE_MAX desired=$LARGE_DESIRED"
+echo "== 1/3 Restoring EKS node groups' desired size (min/max left untouched) =="
+echo "   devtools:       desired=$NODE_DESIRED"
+echo "   devtools-large: desired=$LARGE_DESIRED"
 
 NODEGROUPS=$(aws eks list-nodegroups --cluster-name "$CLUSTER_NAME" --region "$AWS_REGION" --query "nodegroups" --output text)
 
@@ -56,12 +54,12 @@ for ng in $NODEGROUPS; do
   case "$ng" in
     devtools-large-*)
       aws eks update-nodegroup-config --cluster-name "$CLUSTER_NAME" --nodegroup-name "$ng" \
-        --region "$AWS_REGION" --scaling-config "minSize=$LARGE_MIN,maxSize=$LARGE_MAX,desiredSize=$LARGE_DESIRED" \
+        --region "$AWS_REGION" --scaling-config "desiredSize=$LARGE_DESIRED" \
         --query "update.{id:id,status:status}" --output json
       ;;
     devtools-*)
       aws eks update-nodegroup-config --cluster-name "$CLUSTER_NAME" --nodegroup-name "$ng" \
-        --region "$AWS_REGION" --scaling-config "minSize=$NODE_MIN,maxSize=$NODE_MAX,desiredSize=$NODE_DESIRED" \
+        --region "$AWS_REGION" --scaling-config "desiredSize=$NODE_DESIRED" \
         --query "update.{id:id,status:status}" --output json
       ;;
     *)
