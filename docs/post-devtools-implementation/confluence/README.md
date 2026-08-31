@@ -23,6 +23,30 @@ first deploy; see `devtools-labs/docs/bootstrap.md`) via an `ExternalSecret`
 `licenseSsmParameter`) and applied automatically, so the wizard's license
 step should already be satisfied when you reach it.
 
+> **On the cluster-configuration step, submit once and then wait** — don't
+> retry, resubmit, or restart the pod. Submitting `setupcluster.action` makes
+> Confluence tear down and rebuild its Spring/OSGi plugin context *live*,
+> in-process, to apply the new cluster settings. Any request that lands
+> during that rebuild — including the browser's own page load right after
+> the form POST — hits `Error retrieving text key: login.button` /
+> `IllegalStateException: Spring Application context has not been set`. It
+> looks like a fatal crash but isn't: it self-resolves in roughly 15–90
+> seconds with zero intervention. Reload the same page once after waiting;
+> do not resubmit the form or restart the pod — both just re-roll the same
+> race at a different point and can leave `confluence.cfg.xml`'s setup-step
+> marker out of sync with the actual DB schema (see
+> [Cloudflare limitations & gotchas](../../cloudflare-limitations.md) for
+> that specific failure mode and its recovery). Confirmed identical across
+> Confluence 9.3.1, 9.3.2, 9.4.1, and 10.2.13 — this is not fixed by
+> upgrading, which is why this devtool stays on 9.3.1
+> (`devtools-provision/devtools/confluence/values.yaml`'s `image.tag`).
+>
+> Separately, the DB-selection step will very likely say **"Confluence
+> tables already exist in the selected database"** even on a genuinely
+> fresh install — Confluence auto-creates its schema on first DB connection,
+> before setup ever reaches that page, so this message is expected and safe
+> to click through ("overwrite") whenever there's no real content yet.
+
 ---
 
 ## 2. User Directory (LDAP/AD)
