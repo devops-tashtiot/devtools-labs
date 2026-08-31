@@ -51,6 +51,21 @@ profile. Skip it entirely if the bucket already exists (e.g. any subsequent
 
 ## 2. Prerequisite: SSM parameters you set by hand
 
+Before any of the SSM values below can be set, **a real domain has to exist and be active on
+Cloudflare** — the `/devops/prerequisite/cloudflare/tunnel-credentials` row needs a domain to
+create a tunnel against in the first place, and the `cloudflare` Terraform unit needs an active
+zone to look up. This isn't optional or something Terraform can create for you (see
+[SCP Limitations](https://devops-tashtiot.github.io/docs/aws/scp-limitations/) — Route53 is
+blocked wholesale in this AWS account regardless, so DNS was never going to come from AWS side
+either way).
+
+!!! tip "You don't need to buy a domain to follow this guide"
+    The [GitHub Student Developer Pack](https://education.github.com/pack) includes a free
+    domain (via Namecheap, typically a `.me` for one year, renewable while you're a student) with
+    free DNS management included. Point that domain's nameservers at Cloudflare (a free-plan
+    zone, same as this platform's own `devopstashtiot.page` setup) and everything in this guide
+    works with zero cost for the domain itself — only the AWS resources underneath cost anything.
+
 A handful of values have to exist in SSM Parameter Store **before** the
 first `terragrunt apply` — Terraform reads them as data sources rather than
 prompting for them or generating them itself. Set each with
