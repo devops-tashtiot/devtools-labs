@@ -5,6 +5,19 @@ destroyed) AWS account: bootstrap remote state, apply all six Terragrunt
 units, then finish the manual per-devtool configuration that isn't
 GitOps-managed.
 
+```mermaid
+flowchart LR
+    S1["1. aws-terraform-bootstrap<br/>(state bucket, once per account)"]
+    S2["2. Prerequisite SSM params<br/>+ Cloudflare zone/tunnel by hand"]
+    S3["3. terragrunt run-all apply<br/>(eks, rds, domain-controller,<br/>cloudflare, devtools-secrets, backup)"]
+    S4["eks unit:<br/>cluster → ArgoCD →<br/>clusters-applicationset<br/>(blocks until Healthy)<br/>→ devtools-applicationset"]
+    S5["5. Post-deployment setup<br/>(LDAP, SSO, API tokens — manual)"]
+
+    S1 --> S2 --> S3
+    S3 -.contains.-> S4
+    S3 --> S5
+```
+
 !!! important "devtools-labs creates the whole cluster + devtools stack automatically"
     Terraform in this repo only ever touches six things: `eks`, `rds`,
     `domain-controller`, `cloudflare`, `devtools-secrets`, `backup`. It never

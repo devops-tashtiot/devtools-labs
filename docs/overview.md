@@ -12,19 +12,21 @@ Each is an independent `terragrunt` unit under `terraform/live/devtools` —
 no dependency graph between them (see `devtools-labs/CLAUDE.md` → "Six
 independent units").
 
+```mermaid
+flowchart TB
+    TF["devtools-labs<br/>(Terraform / Terragrunt)"]
+    TF --> EKS["eks<br/>cluster + ArgoCD bootstrap"]
+    TF --> RDS["rds<br/>shared Postgres"]
+    TF --> DC["domain-controller<br/>AD forest for LDAP/SSO"]
+    TF --> CF["cloudflare<br/>DNS, tunnel, Access, Origin CA"]
+    TF --> DS["devtools-secrets<br/>shared admin/OIDC secrets"]
+    TF --> BK["backup<br/>AWS Backup vault + cross-region copy"]
 ```
-                      ┌─────────────────────────────────────────┐
-                      │              devtools-labs               │
-                      │         (Terraform / Terragrunt)          │
-                      └─────────────────────────────────────────┘
-                                        │
-        ┌──────────────┬───────────────┼───────────────┬──────────────┬──────────────┐
-        ▼              ▼               ▼               ▼              ▼              ▼
-   ┌────────┐    ┌──────────┐   ┌─────────────┐  ┌───────────┐  ┌──────────┐   ┌──────────┐
-   │  eks   │    │   rds    │   │   domain-   │  │ cloudflare│  │ devtools-│   │  backup  │
-   │        │    │          │   │  controller │  │           │  │ secrets  │   │          │
-   └────────┘    └──────────┘   └─────────────┘  └───────────┘  └──────────┘   └──────────┘
-```
+
+No arrow runs between the six boxes themselves — each is an independent
+Terragrunt unit with no `dependency` block on any other (see
+`devtools-labs/CLAUDE.md` → "Six independent units"); `terragrunt run-all
+apply` runs all six in parallel.
 
 ### `eks` — the cluster itself (the slow one, does the real bootstrap)
 
@@ -111,10 +113,28 @@ which Terraform can create for you:
 2. **Cloudflare setup** — a real, active Cloudflare zone, a Tunnel, and an Access Application all
    have to exist first; none of this is Terraform-managed (Route53 is blocked wholesale in this
    AWS account regardless — see [SCP Limitations](https://devops-tashtiot.github.io/docs/aws/scp-limitations/)
-   — so DNS/domain setup was never going to come from the AWS side). See
-   [Cloudflare/CoreDNS routing](architecture.md) (see its "Prerequisite Cloudflare setup"
-   section) for the exact steps, including the `allowed_idps` gotcha and where the tunnel
-   credential actually lands in SSM.
+   — so DNS/domain setup was never going to come from the AWS side). Done once, by hand, before
+   the first apply:
+   1. **Domain on Cloudflare** — zone active, nameservers pointed at Cloudflare.
+   2. **A Cloudflare Tunnel** — `cloudflared tunnel create <name>` from an authenticated CLI;
+      the resulting credentials JSON is published to SSM at
+      `/devops/prerequisite/cloudflare/tunnel-credentials`, which the in-cluster `cloudflared`
+      Deployment reads via an `ExternalSecret` (it never touches a local credentials file).
+   3. **DNS records per subdomain** — a `CNAME` per hostname (or a wildcard) pointing at
+      `<tunnel-id>.cfargotunnel.com`, proxied (orange-cloud).
+   4. **Cloudflare Access (Zero Trust)** — a one-time-email-code Identity Provider plus an Access
+      Application covering `*.devopstashtiot.page` with an email-allowlist policy. The
+      Application's `allowed_idps` **must** explicitly reference that IDP, or Access silently
+      falls back to its default (account-members-only) IDP and blocks every allowlisted email
+      with no trace in the logs.
+   5. **Origin CA certificate** — issued via Cloudflare's own Origin CA API (not a
+      publicly-trusted CA); the cert and key are published to SSM and mounted into
+      `ingress-nginx` as a TLS secret so `cloudflared` can reach it over real HTTPS.
+
+   See [Cloudflare/CoreDNS routing](architecture.md) (its "Prerequisite Cloudflare setup"
+   section) for the full detail behind each step, and
+   [Cloudflare limitations & gotchas](cloudflare-limitations.md) for what's constrained
+   afterward (session length, service-token blast radius, Origin CA trust, etc).
 
 After the cluster is up, a third category (`postdeploy`) covers per-devtool manual steps like API
 tokens and OAuth client secrets — see [Post-deployment setup](post-devtools-implementation/jira/README.md)

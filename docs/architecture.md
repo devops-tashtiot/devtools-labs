@@ -7,27 +7,23 @@ different paths, converging only at `ingress-nginx-controller`.
 
 ## A browser hitting `https://bitbucket.devopstashtiot.page`
 
-```
-Browser
-  │  DNS lookup (public) — CNAME to <tunnel-id>.cfargotunnel.com, proxied (orange-cloud)
-  ▼
-Cloudflare anycast edge
-  │  Cloudflare Access: valid session cookie present?
-  │    no  → redirect to email one-time-code login, then back here
-  │    yes → continue
-  ▼
-Cloudflare Tunnel (the pre-established OUTBOUND connection from cloudflared)
-  │  request travels down the tunnel cloudflared already opened
-  ▼
-cloudflared pod (inside the cluster)
-  │  matches the request against its ingress rules (a single catch-all today):
-  │    service: https://ingress-nginx-controller.ingress-nginx.svc.cluster.local:443
-  │    originServerName: devopstashtiot.page   (TLS SNI override — see note below)
-  ▼
-ingress-nginx-controller Service (ClusterIP, in-cluster)
-  │  routes by Host header, same as any Kubernetes Ingress controller
-  ▼
-bitbucket Service → bitbucket-0 pod
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant CF as Cloudflare edge<br/>(Access + Tunnel)
+    participant CD as cloudflared pod<br/>(in-cluster)
+    participant NG as ingress-nginx-controller<br/>Service (ClusterIP)
+    participant BB as bitbucket Service<br/>→ bitbucket-0 pod
+
+    B->>CF: DNS lookup (public) — CNAME to<br/><tunnel-id>.cfargotunnel.com, proxied
+    CF->>CF: Access: valid session cookie?
+    alt no session
+        CF-->>B: redirect to email one-time-code login
+        B->>CF: retry after login
+    end
+    CF->>CD: forward down the pre-established<br/>outbound Tunnel connection
+    CD->>NG: HTTPS, originServerName: devopstashtiot.page<br/>(TLS SNI override — see note below)
+    NG->>BB: route by Host header
 ```
 
 **Why `originServerName` is set explicitly**: `cloudflared` connects to
@@ -52,18 +48,17 @@ if it had connected to `devopstashtiot.page`.
 Example: `argocd-server`'s own OIDC discovery call to
 `rhbk.devopstashtiot.page` during login.
 
-```
-argocd-server pod
-  │  DNS lookup for rhbk.devopstashtiot.page
-  ▼
-CoreDNS (in-cluster resolver)
-  │  rewrite name exact rhbk.devopstashtiot.page
-  │    ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto
-  ▼
-ingress-nginx-controller Service (ClusterIP) — SAME final step as the browser path
-  │  routes by Host header
-  ▼
-rhbk Service → rhbk-0 pod
+```mermaid
+sequenceDiagram
+    participant AC as argocd-server pod
+    participant DNS as CoreDNS<br/>(in-cluster resolver)
+    participant NG as ingress-nginx-controller<br/>Service (ClusterIP)
+    participant RH as rhbk Service<br/>→ rhbk-0 pod
+
+    AC->>DNS: DNS lookup for rhbk.devopstashtiot.page
+    DNS-->>AC: rewritten to ingress-nginx-controller.<br/>ingress-nginx.svc.cluster.local
+    AC->>NG: same final hop as the browser path
+    NG->>RH: route by Host header
 ```
 
 No Cloudflare edge, no tunnel, no Access check — the DNS answer is
@@ -108,47 +103,102 @@ ever reaches the tunnel — the cluster itself has no idea Access exists.
 
 ## Prerequisite Cloudflare setup — what has to exist before any of this works
 
-Everything above assumes a Cloudflare zone, tunnel, and Access app already
-exist. None of that is created by `terraform/modules/eks` or by ArgoCD —
-it's set up once, by hand, before the first apply:
+Only two things are genuinely manual, one-time, human-driven steps that
+nothing in this repo can create:
 
-1. **Domain on Cloudflare** — the zone must already be active (nameservers
-   pointed at Cloudflare) before anything else here works.
+1. **Domain on Cloudflare** — the zone's nameservers must already point at
+   Cloudflare before anything else here works. (The `cloudflare_zone`
+   resource itself is Terraform-managed — see below — but Cloudflare won't
+   activate a zone until the registrar's nameservers are pointed at it, and
+   that handoff happens outside Terraform.)
 2. **A Cloudflare Tunnel** — created once via `cloudflared tunnel create
    <name>` from an authenticated `cloudflared` CLI. This generates a
    tunnel ID and a credentials JSON file. That file's contents go into SSM
    at `/devops/prerequisite/cloudflare/tunnel-credentials` — the in-cluster
    `cloudflared` Deployment reads it from there via an `ExternalSecret`, it
-   never touches a local credentials file.
-3. **DNS records per subdomain** — a `CNAME` for each hostname (or a
-   wildcard), pointing at `<tunnel-id>.cfargotunnel.com`, proxied
-   (orange-cloud) so Cloudflare's edge actually terminates the connection
-   instead of routing straight to an IP.
-4. **Cloudflare Access (Zero Trust)** — an Identity Provider (a one-time
-   email code login type) plus an Access Application covering
-   `*.devopstashtiot.page`, with an email-allowlist policy. The
-   Application's `allowed_idps` field **must** explicitly reference that
-   IDP — leaving it unset makes Access silently fall back to its default
-   (account-members-only) IDP, which blocks every allowlisted email with
-   no trace in the Access logs, since the fallback happens before the
-   email policy is ever evaluated.
-5. **Origin CA certificate** — issued through Cloudflare's own Origin CA
-   API, not a publicly-trusted CA (it's only meant to be trusted between
-   Cloudflare's edge and an origin server — see
-   [Cloudflare limitations & gotchas](cloudflare-limitations.md) for what
-   trusting it actually requires from every devtool). This is what lets
-   `cloudflared` connect to `ingress-nginx` over real HTTPS instead of
-   plain HTTP. The cert and key are published to SSM and mounted into
-   `ingress-nginx` as a TLS secret.
+   never touches a local credentials file. `terraform/modules/cloudflare`
+   only looks the tunnel up read-only (`data "cloudflare_zero_trust_tunnel_
+   cloudflared"`) — the classic tunnel secret is generated client-side by
+   the CLI and never round-trips through Cloudflare's API, so a managed
+   `resource` here would leave that field unset in state and force a
+   destroy+recreate on the next apply.
 
-Steps 2 and 5 land their outputs in SSM Parameter Store specifically so
-the cluster can consume them read-only — `devtools-labs/terraform/modules/
-cloudflare` looks most of this up as a `data` source rather than owning
-its lifecycle as a managed `resource` (see that module's `main.tf`).
-Rotating the tunnel credentials or the Origin CA cert later means redoing
-the relevant step above and re-publishing to the same SSM path — Terraform
-doesn't generate or rotate either one itself.
+Everything else that used to be a manual step is now owned by the
+`cloudflare` Terraform module (`terraform/modules/cloudflare`, applied from
+`terraform/live/devtools/cloudflare`) as a real managed `resource`, not a
+one-off dashboard/curl action:
 
-**Still not covered by this page**: Cloudflare Access service tokens used
-for non-interactive access (e.g. pushing to Bitbucket from outside the
-cluster) — see the parent `CLAUDE.md`'s Cloudflare section for that.
+- **DNS records per subdomain** — `cloudflare_dns_record.this`, one per
+  entry in that unit's `dns_records` map — a `CNAME` per hostname (or
+  wildcard) pointing at `<tunnel-id>.cfargotunnel.com`, proxied
+  (orange-cloud) so Cloudflare's edge actually terminates the connection
+  instead of routing straight to an IP. Adding a new subdomain is a map
+  entry + `terragrunt apply`, not a curl call.
+- **Cloudflare Access (Zero Trust)** — `cloudflare_zero_trust_access_
+  identity_provider.onetimepin` (the one-time-email-code IDP) plus
+  `cloudflare_zero_trust_access_application.this` covering
+  `*.devopstashtiot.page`, with an inline `allow` policy built from the
+  unit's `allowed_emails` list. The Application's `allowed_idps` field
+  **must** explicitly reference that IDP resource — leaving it unset makes
+  Access silently fall back to its own default (account-members-only) IDP,
+  which blocks every allowlisted email with no trace in the Access logs,
+  since the fallback happens before the email policy is ever evaluated.
+- **Origin CA certificate** — also fully Terraform-managed:
+  `tls_private_key` generates the RSA key, `tls_cert_request` builds the
+  CSR from it, and `cloudflare_origin_ca_certificate` submits that CSR to
+  Cloudflare's Origin CA API. The private key never leaves Terraform
+  state/SSM — only the derived CSR is ever sent to Cloudflare. Both cert
+  and key are published to SSM (`origin_cert_crt_ssm_parameter` /
+  `origin_cert_key_ssm_parameter`) and mounted into `ingress-nginx` as a
+  TLS secret via `ExternalSecret`, letting `cloudflared` connect to
+  `ingress-nginx` over real HTTPS instead of plain HTTP. Unlike the tunnel
+  secret, nothing here needs to survive from a prior cert — Cloudflare's
+  edge trusts any valid Origin CA cert whose hostnames match, so a fresh
+  key+CSR on every rotation is a safe, non-disruptive replace, not a
+  destroy/recreate hazard.
+
+Since none of the three bullets above require a human to run `cloudflared`
+or hit the dashboard anymore, only the domain/zone handoff and the tunnel
+creation remain true prerequisites — everything else is just
+`terragrunt apply`.
+
+## Cloudflare Access service tokens for non-interactive access
+
+A `git push` (or any other non-browser client) can't complete Access's
+email-one-time-code flow — there's no browser to redirect. Bitbucket push
+access from outside the cluster (see the parent `CLAUDE.md`'s Cloudflare
+section for the client-side usage) solves this with a **service token**,
+`cloudflare_zero_trust_access_service_token.bitbucket_push`, which is
+presented as `CF-Access-Client-Id`/`CF-Access-Client-Secret` headers
+instead of a session cookie. Cloudflare only returns the `client_secret`
+once, at creation, so it's published to SSM immediately
+(`bitbucket_push_service_token_client_id_ssm_parameter` /
+`..._client_secret_ssm_parameter`) rather than left recoverable only from
+Terraform state.
+
+The token is authorized by a **second, independent policy** on the same
+shared Access Application described above — Access grants a request if
+*any* policy on the app matches, so this doesn't weaken the email-OTP
+policy at all; it just adds a second, non-interactive way in:
+
+```mermaid
+flowchart LR
+    subgraph App["cloudflare_zero_trust_access_application (*.devopstashtiot.page)"]
+        P1["Policy: allow<br/>email in allowed_emails"]
+        P2["Policy: non_identity<br/>service_token = bitbucket_push"]
+    end
+    Browser -->|email one-time code| P1
+    GitClient["git push client<br/>(CF-Access-Client-Id/Secret headers)"] -->|no identity established| P2
+```
+
+**Its blast radius is domain-wide, not Bitbucket-specific** — the
+`non_identity` policy sits on the same wildcard Access Application whose
+`domain` is the bare `*.devopstashtiot.page`, so this token bypasses the
+email-OTP wall for *every* hostname on the platform (Jira, ArgoCD, RHBK,
+...), not just Bitbucket. Bitbucket push is its current consumer, not the
+limit of what it can reach — its SSM parameter and dashboard naming are
+deliberately not scoped to "bitbucket" for exactly this reason (see the
+`wildcard-access-otp-bypass` naming in `terraform/modules/cloudflare`).
+Anyone adding a second consumer of this same token, or a new
+`non_identity` policy of their own, should treat that as expanding access
+to the whole domain, not to one app.
