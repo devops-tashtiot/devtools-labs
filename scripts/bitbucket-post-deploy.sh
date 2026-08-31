@@ -136,86 +136,16 @@ always the Hostname/Port/Username/Password above, not anything further
 down this form.
 
 --------------------------------------------------------------------------
-ADVANCED SETTINGS -> SCHEMA MAPPING -> USER SCHEMA
+ADVANCED SETTINGS -> ENABLE NESTED GROUPS
 --------------------------------------------------------------------------
-  User Object Class           :  user
-  User Object Filter          :  (sAMAccountName=*)
-  User Name Attribute         :  sAMAccountName
-  User Name RDN Attribute     :  cn
-  User First Name Attribute   :  givenName
-  User Last Name Attribute    :  sn
-  User Display Name Attribute :  displayName
-  User Email Attribute        :  mail
-  User Unique ID Attribute    :  objectGUID
+  Enable Nested Groups   :  CHECKED (on)
 
-These are standard AD attribute names, not anything custom to this
-platform — you'd type the same values connecting any Atlassian DC product
-to any AD domain.
+Everything else on this form (schema mapping, Follow Referrals, etc.) is
+already correct at Bitbucket's own defaults for a Microsoft Active
+Directory directory type — nothing else needs changing.
 
---------------------------------------------------------------------------
-ADVANCED SETTINGS -> SCHEMA MAPPING -> GROUP SCHEMA
---------------------------------------------------------------------------
-  Group Object Class          :  group
-  Group Object Filter         :  (objectCategory=Group)
-  Group Name Attribute        :  cn
-  Group Description Attribute :  description
-
---------------------------------------------------------------------------
-ADVANCED SETTINGS -> SCHEMA MAPPING -> MEMBERSHIP SCHEMA
---------------------------------------------------------------------------
-  Group Members Attribute             :  member
-  Use the User Membership Attribute   :  "When finding the members of a group"
-               -> This is a deliberate, non-default choice. AD's group
-                  object already lists every member's DN in its own
-                  "member" attribute, which is more reliable to resolve
-                  from in a flat (non-nested) group structure than
-                  walking each user's own back-link attribute. RHBK's own
-                  LDAP federation for this same AD resolves group
-                  membership the same way, so this keeps every
-                  integration on the platform consistent with each other.
-
---------------------------------------------------------------------------
-ADVANCED SETTINGS -> "FOLLOW REFERRALS" — UNCHECK THIS, READ WHY
---------------------------------------------------------------------------
-  Follow Referrals   :  UNCHECKED (off)
-
-  This is the one setting most likely to trip you up, because every field
-  above can be entered correctly and the directory will still fail — on
-  the "Test retrieve user" button specifically, not on "Test Connection".
-
-  WHAT YOU'LL SEE IF YOU LEAVE IT CHECKED (the symptom):
-      org.springframework.ldap.PartialResultException: nested exception is
-      javax.naming.PartialResultException [Root exception is
-      javax.naming.CommunicationException: devtools.local:389 [Root
-      exception is java.net.UnknownHostException: devtools.local]]
-
-  WHY THIS HAPPENS:
-      Active Directory frequently answers an LDAP search with a
-      "referral" — a response that essentially says "the rest of this
-      search is at ldap://devtools.local/..." — even when you're already
-      querying the right domain controller directly by its IP. This is
-      completely normal AD behavior around naming-context boundaries and
-      paged searches; it does not mean anything is misconfigured on the
-      connection itself.
-
-      If "Follow Referrals" is ON, Bitbucket's LDAP client (Spring
-      LDAP/JNDI under the hood) dutifully tries to open a brand-new
-      connection to that referral target. The referral target is AD's
-      own DNS name ("devtools.local"), not the IP address you configured
-      above — and since nothing in this platform resolves that DNS name
-      (same reason the Hostname field above uses an IP), the connection
-      attempt just fails outright with UnknownHostException.
-
-  THE FIX:
-      Uncheck "Follow Referrals" in this directory's Advanced Settings.
-      There's no downside to turning it off here — this platform's AD
-      structure is flat (one OU, no nested domains or partitions), so
-      there is nothing a referral would ever legitimately need to point
-      the client at anyway.
-
-Once Follow Referrals is off, click "Test retrieve user" again — it
-should now succeed. Save the directory, then run a directory sync so
-users/groups actually populate.
+Click "Test retrieve user", then save the directory and run a directory
+sync so users/groups actually populate.
 EOF
 
 # ----------------------------------------------------------------------------
