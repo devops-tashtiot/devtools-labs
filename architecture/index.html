@@ -1,0 +1,1098 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Terraform + Terragrunt infra for the self-hosted devtools platform — EKS, ArgoCD bootstrap, RDS, EFS, and an AD domain controller — plus the manual post-deployment steps each devtool still needs.">
+      
+      
+      
+        <link rel="canonical" href="https://devops-tashtiot.github.io/devtools-labs/architecture/">
+      
+      
+        <link rel="prev" href="../overview/">
+      
+      
+        <link rel="next" href="../cloudflare-limitations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Cloudflare/CoreDNS routing - devtools-labs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#how-cloudflare-routes-traffic-into-the-cluster" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="devtools-labs" class="md-header__button md-logo" aria-label="devtools-labs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            devtools-labs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Cloudflare/CoreDNS routing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="devtools-labs" class="md-nav__button md-logo" aria-label="devtools-labs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    devtools-labs
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bootstrap from scratch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloudflare/CoreDNS routing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloudflare/CoreDNS routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#a-browser-hitting-httpsbitbucketdevopstashtiotpage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A browser hitting https://bitbucket.devopstashtiot.page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#an-in-cluster-caller-hitting-the-same-hostname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An in-cluster caller hitting the same hostname
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudflare-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloudflare Access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisite-cloudflare-setup-what-has-to-exist-before-any-of-this-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisite Cloudflare setup — what has to exist before any of this works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudflare-access-service-tokens-for-non-interactive-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloudflare Access service tokens for non-interactive access
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloudflare-limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloudflare limitations & gotchas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ssm-parameters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SSM Parameter Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Post-deployment setup
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Post-deployment setup
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-devtools-implementation/jira/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jira
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-devtools-implementation/confluence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Confluence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-devtools-implementation/bitbucket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bitbucket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-devtools-implementation/argocd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ArgoCD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-devtools-implementation/woodpecker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Woodpecker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#a-browser-hitting-httpsbitbucketdevopstashtiotpage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A browser hitting https://bitbucket.devopstashtiot.page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#an-in-cluster-caller-hitting-the-same-hostname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An in-cluster caller hitting the same hostname
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudflare-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloudflare Access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisite-cloudflare-setup-what-has-to-exist-before-any-of-this-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisite Cloudflare setup — what has to exist before any of this works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudflare-access-service-tokens-for-non-interactive-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloudflare Access service tokens for non-interactive access
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="how-cloudflare-routes-traffic-into-the-cluster">How Cloudflare Routes Traffic Into the Cluster<a class="headerlink" href="#how-cloudflare-routes-traffic-into-the-cluster" title="Permanent link">&para;</a></h1>
+<p><code>*.devopstashtiot.page</code> has no inbound-facing LoadBalancer, public IP, or
+open firewall port anywhere in this platform. A browser reaching a devtool
+and an in-cluster caller reaching the exact same hostname take genuinely
+different paths, converging only at <code>ingress-nginx-controller</code>.</p>
+<h2 id="a-browser-hitting-httpsbitbucketdevopstashtiotpage">A browser hitting <code>https://bitbucket.devopstashtiot.page</code><a class="headerlink" href="#a-browser-hitting-httpsbitbucketdevopstashtiotpage" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant B as Browser
+    participant CF as Cloudflare edge&lt;br/&gt;(Access + Tunnel)
+    participant CD as cloudflared pod&lt;br/&gt;(in-cluster)
+    participant NG as ingress-nginx-controller&lt;br/&gt;Service (ClusterIP)
+    participant BB as bitbucket Service&lt;br/&gt;→ bitbucket-0 pod
+
+    B-&gt;&gt;CF: DNS lookup (public) — CNAME to&lt;br/&gt;&lt;tunnel-id&gt;.cfargotunnel.com, proxied
+    CF-&gt;&gt;CF: Access: valid session cookie?
+    alt no session
+        CF--&gt;&gt;B: redirect to email one-time-code login
+        B-&gt;&gt;CF: retry after login
+    end
+    CF-&gt;&gt;CD: forward down the pre-established&lt;br/&gt;outbound Tunnel connection
+    CD-&gt;&gt;NG: HTTPS, originServerName: devopstashtiot.page&lt;br/&gt;(TLS SNI override — see note below)
+    NG-&gt;&gt;BB: route by Host header</code></pre>
+<p><strong>Why <code>originServerName</code> is set explicitly</strong>: <code>cloudflared</code> connects to
+ingress-nginx over <em>real</em> HTTPS (ingress-nginx presents a Cloudflare Origin
+Certificate on :443), not plain HTTP — plain HTTP was tried first and was
+the root cause of every devtool computing the wrong
+<code>X-Forwarded-Port</code>/<code>X-Forwarded-Proto</code> (nginx's <code>$scheme</code>/<code>$server_port</code>
+reflect the actual connection, which was always <code>http</code>/<code>80</code> regardless of
+what scheme the browser used at the edge; RHBK/Keycloak and Bitbucket both
+built <code>:80</code> redirect URLs because of this). But <code>cloudflared</code> connects to
+the Service by its cluster-DNS name
+(<code>ingress-nginx-controller.ingress-nginx.svc.cluster.local</code>), which the
+Origin Certificate's SAN doesn't cover — the cert only covers
+<code>*.devopstashtiot.page</code>/<code>devopstashtiot.page</code>. <code>originServerName</code> overrides
+only what's used for TLS validation (the SNI/hostname the cert is checked
+against), not where the connection actually goes — so the connection still
+opens to the cluster-DNS name, but Cloudflare validates the certificate as
+if it had connected to <code>devopstashtiot.page</code>.</p>
+<h2 id="an-in-cluster-caller-hitting-the-same-hostname">An in-cluster caller hitting the same hostname<a class="headerlink" href="#an-in-cluster-caller-hitting-the-same-hostname" title="Permanent link">&para;</a></h2>
+<p>Example: <code>argocd-server</code>'s own OIDC discovery call to
+<code>rhbk.devopstashtiot.page</code> during login.</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant AC as argocd-server pod
+    participant DNS as CoreDNS&lt;br/&gt;(in-cluster resolver)
+    participant NG as ingress-nginx-controller&lt;br/&gt;Service (ClusterIP)
+    participant RH as rhbk Service&lt;br/&gt;→ rhbk-0 pod
+
+    AC-&gt;&gt;DNS: DNS lookup for rhbk.devopstashtiot.page
+    DNS--&gt;&gt;AC: rewritten to ingress-nginx-controller.&lt;br/&gt;ingress-nginx.svc.cluster.local
+    AC-&gt;&gt;NG: same final hop as the browser path
+    NG-&gt;&gt;RH: route by Host header</code></pre>
+<p>No Cloudflare edge, no tunnel, no Access check — the DNS answer is
+substituted before the request ever leaves the cluster's own network. Both
+paths converge on the same <code>ingress-nginx-controller</code> Service; only how a
+caller <em>reaches</em> that Service differs.</p>
+<p><strong>Why this rewrite has to exist.</strong> Without it, an in-cluster caller's DNS
+lookup for <code>rhbk.devopstashtiot.page</code> would resolve the normal, public
+way — straight to Cloudflare's edge, exactly like a browser's would. The
+request would still technically succeed in reaching RHBK (Cloudflare would
+forward it right back into the cluster via the tunnel), but the <em>TLS
+certificate chain</em> would be wrong for that caller: RHBK's own OIDC client
+is configured to trust only the internal Origin CA (a private CA used for
+east-west/in-cluster TLS), not whatever public CA actually terminates
+Cloudflare's edge-facing certificate. The handshake itself works fine; the
+caller just doesn't trust the chain, and the call fails with a
+certificate-verification error. Routing in-cluster callers directly to the
+ClusterIP sidesteps the problem entirely — no public cert, no trust
+mismatch.</p>
+<p>The rewrite list currently covers: <code>bitbucket</code>, <code>confluence</code>, <code>jira</code>,
+<code>sonarqube</code>, <code>artifactory</code>, <code>harbor</code>, <code>rhbk</code>, and <code>woodpecker</code>
+(<code>*.devopstashtiot.page</code>), plus a dedicated pair of rules for
+<code>argocd.devopstashtiot.page</code> and any <code>*.argocd.devopstashtiot.page</code>
+subdomain (routed to <code>argocd-server</code> directly rather than through
+ingress-nginx, since no Ingress rule exists for arbitrary ArgoCD
+subdomains).</p>
+<p><strong>How the rewrite is actually applied</strong>: injected via the <code>coredns</code> EKS
+addon's own <code>configuration_values.corefile</code> field, not a direct ConfigMap
+edit — this is the addon's own supported configuration input, so it
+survives addon upgrades/reconciliation and needs no separate restart step.</p>
+<h2 id="cloudflare-access">Cloudflare Access<a class="headerlink" href="#cloudflare-access" title="Permanent link">&para;</a></h2>
+<p>Every hostname under <code>*.devopstashtiot.page</code> sits behind Cloudflare Access
+with a single policy: only a fixed allowlist of email addresses can
+authenticate, via a one-time code sent by email (no separate credential to
+manage). This is enforced entirely at Cloudflare's edge, before a request
+ever reaches the tunnel — the cluster itself has no idea Access exists.</p>
+<h2 id="prerequisite-cloudflare-setup-what-has-to-exist-before-any-of-this-works">Prerequisite Cloudflare setup — what has to exist before any of this works<a class="headerlink" href="#prerequisite-cloudflare-setup-what-has-to-exist-before-any-of-this-works" title="Permanent link">&para;</a></h2>
+<p>Only two things are genuinely manual, one-time, human-driven steps that
+nothing in this repo can create:</p>
+<ol>
+<li><strong>Domain on Cloudflare</strong> — the zone's nameservers must already point at
+   Cloudflare before anything else here works. (The <code>cloudflare_zone</code>
+   resource itself is Terraform-managed — see below — but Cloudflare won't
+   activate a zone until the registrar's nameservers are pointed at it, and
+   that handoff happens outside Terraform.)</li>
+<li><strong>A Cloudflare Tunnel</strong> — created once via <code>cloudflared tunnel create
+   &lt;name&gt;</code> from an authenticated <code>cloudflared</code> CLI. This generates a
+   tunnel ID and a credentials JSON file. That file's contents go into SSM
+   at <code>/devops/prerequisite/cloudflare/tunnel-credentials</code> — the in-cluster
+   <code>cloudflared</code> Deployment reads it from there via an <code>ExternalSecret</code>, it
+   never touches a local credentials file. <code>terraform/modules/cloudflare</code>
+   only looks the tunnel up read-only (<code>data "cloudflare_zero_trust_tunnel_
+   cloudflared"</code>) — the classic tunnel secret is generated client-side by
+   the CLI and never round-trips through Cloudflare's API, so a managed
+   <code>resource</code> here would leave that field unset in state and force a
+   destroy+recreate on the next apply.</li>
+</ol>
+<p>Everything else that used to be a manual step is now owned by the
+<code>cloudflare</code> Terraform module (<code>terraform/modules/cloudflare</code>, applied from
+<code>terraform/live/devtools/cloudflare</code>) as a real managed <code>resource</code>, not a
+one-off dashboard/curl action:</p>
+<ul>
+<li><strong>DNS records per subdomain</strong> — <code>cloudflare_dns_record.this</code>, one per
+  entry in that unit's <code>dns_records</code> map — a <code>CNAME</code> per hostname (or
+  wildcard) pointing at <code>&lt;tunnel-id&gt;.cfargotunnel.com</code>, proxied
+  (orange-cloud) so Cloudflare's edge actually terminates the connection
+  instead of routing straight to an IP. Adding a new subdomain is a map
+  entry + <code>terragrunt apply</code>, not a curl call.</li>
+<li><strong>Cloudflare Access (Zero Trust)</strong> — <code>cloudflare_zero_trust_access_
+  identity_provider.onetimepin</code> (the one-time-email-code IDP) plus
+  <code>cloudflare_zero_trust_access_application.this</code> covering
+  <code>*.devopstashtiot.page</code>, with an inline <code>allow</code> policy built from the
+  unit's <code>allowed_emails</code> list. The Application's <code>allowed_idps</code> field
+  <strong>must</strong> explicitly reference that IDP resource — leaving it unset makes
+  Access silently fall back to its own default (account-members-only) IDP,
+  which blocks every allowlisted email with no trace in the Access logs,
+  since the fallback happens before the email policy is ever evaluated.</li>
+<li><strong>Origin CA certificate</strong> — also fully Terraform-managed:
+  <code>tls_private_key</code> generates the RSA key, <code>tls_cert_request</code> builds the
+  CSR from it, and <code>cloudflare_origin_ca_certificate</code> submits that CSR to
+  Cloudflare's Origin CA API. The private key never leaves Terraform
+  state/SSM — only the derived CSR is ever sent to Cloudflare. Both cert
+  and key are published to SSM (<code>origin_cert_crt_ssm_parameter</code> /
+  <code>origin_cert_key_ssm_parameter</code>) and mounted into <code>ingress-nginx</code> as a
+  TLS secret via <code>ExternalSecret</code>, letting <code>cloudflared</code> connect to
+  <code>ingress-nginx</code> over real HTTPS instead of plain HTTP. Unlike the tunnel
+  secret, nothing here needs to survive from a prior cert — Cloudflare's
+  edge trusts any valid Origin CA cert whose hostnames match, so a fresh
+  key+CSR on every rotation is a safe, non-disruptive replace, not a
+  destroy/recreate hazard.</li>
+</ul>
+<p>Since none of the three bullets above require a human to run <code>cloudflared</code>
+or hit the dashboard anymore, only the domain/zone handoff and the tunnel
+creation remain true prerequisites — everything else is just
+<code>terragrunt apply</code>.</p>
+<h2 id="cloudflare-access-service-tokens-for-non-interactive-access">Cloudflare Access service tokens for non-interactive access<a class="headerlink" href="#cloudflare-access-service-tokens-for-non-interactive-access" title="Permanent link">&para;</a></h2>
+<p>A <code>git push</code> (or any other non-browser client) can't complete Access's
+email-one-time-code flow — there's no browser to redirect. Bitbucket push
+access from outside the cluster (see the parent <code>CLAUDE.md</code>'s Cloudflare
+section for the client-side usage) solves this with a <strong>service token</strong>,
+<code>cloudflare_zero_trust_access_service_token.bitbucket_push</code>, which is
+presented as <code>CF-Access-Client-Id</code>/<code>CF-Access-Client-Secret</code> headers
+instead of a session cookie. Cloudflare only returns the <code>client_secret</code>
+once, at creation, so it's published to SSM immediately
+(<code>bitbucket_push_service_token_client_id_ssm_parameter</code> /
+<code>..._client_secret_ssm_parameter</code>) rather than left recoverable only from
+Terraform state.</p>
+<p>The token is authorized by a <strong>second, independent policy</strong> on the same
+shared Access Application described above — Access grants a request if
+<em>any</em> policy on the app matches, so this doesn't weaken the email-OTP
+policy at all; it just adds a second, non-interactive way in:</p>
+<pre class="mermaid"><code>flowchart LR
+    subgraph App["cloudflare_zero_trust_access_application (*.devopstashtiot.page)"]
+        P1["Policy: allow&lt;br/&gt;email in allowed_emails"]
+        P2["Policy: non_identity&lt;br/&gt;service_token = bitbucket_push"]
+    end
+    Browser --&gt;|email one-time code| P1
+    GitClient["git push client&lt;br/&gt;(CF-Access-Client-Id/Secret headers)"] --&gt;|no identity established| P2</code></pre>
+<p><strong>Its blast radius is domain-wide, not Bitbucket-specific</strong> — the
+<code>non_identity</code> policy sits on the same wildcard Access Application whose
+<code>domain</code> is the bare <code>*.devopstashtiot.page</code>, so this token bypasses the
+email-OTP wall for <em>every</em> hostname on the platform (Jira, ArgoCD, RHBK,
+...), not just Bitbucket. Bitbucket push is its current consumer, not the
+limit of what it can reach — its SSM parameter and dashboard naming are
+deliberately not scoped to "bitbucket" for exactly this reason (see the
+<code>wildcard-access-otp-bypass</code> naming in <code>terraform/modules/cloudflare</code>).
+Anyone adding a second consumer of this same token, or a new
+<code>non_identity</code> policy of their own, should treat that as expanding access
+to the whole domain, not to one app.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
