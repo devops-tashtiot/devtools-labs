@@ -10,17 +10,21 @@ set -euo pipefail
 #   1. Fetches every value those two screens need from SSM and walks you
 #      through exactly what to type where and why, field by field, so
 #      you're never guessing or hunting for a parameter name mid-wizard.
-#   2. Fully automates step 3 (API Token for devops-api) via Bitbucket's
-#      access-tokens REST API, which *is* scriptable — creates/rotates a
-#      Personal Access Token for the admin account and publishes it to SSM.
-#      This part actually runs; steps 1/2 only print instructions, since
-#      there's no API for this script to drive instead.
+#   2. Fully automates steps 3 and 4 via Bitbucket's REST API, which *is*
+#      scriptable for both: creates/rotates a Personal Access Token for
+#      devops-api and publishes it to SSM (step 3), and grants the
+#      Terraform-created AD group global ADMIN on Bitbucket (step 4).
+#      Steps 1/2 only print instructions, since there's no API for this
+#      script to drive instead.
 #
-# Idempotent: re-running step 3 rotates the token in place (Bitbucket's
-# access-tokens API treats the token "name" as the identity — PUTting the
-# same name again replaces the previous token of that name rather than
-# creating a duplicate), and re-publishing to SSM with --overwrite is safe
-# to repeat.
+# Idempotent throughout:
+#   - Step 3 rotates the token in place (Bitbucket's access-tokens API
+#     treats the token "name" as the identity — PUTting the same name
+#     again replaces the previous token rather than creating a duplicate),
+#     and re-publishing to SSM with --overwrite is safe to repeat.
+#   - Step 4's PUT on /rest/api/1.0/admin/permissions/groups sets the
+#     group's permission to exactly ADMIN regardless of its prior value —
+#     safe to re-run.
 
 AWS_PROFILE="${AWS_PROFILE:-342831714456_Workload-Admin-PS}"
 AWS_REGION="${AWS_REGION:-il-central-1}"
@@ -31,6 +35,14 @@ BITBUCKET_ADMIN_USER="${BITBUCKET_ADMIN_USER:-admin}"
 TOKEN_NAME="${TOKEN_NAME:-devops-api}"
 TOKEN_PERMISSIONS="${TOKEN_PERMISSIONS:-REPO_WRITE}"
 TOKEN_SSM_PARAM="/devops/postdeploy/bitbucket/api-token"
+# Matches ad_group_name's default in terraform/modules/domain-controller/
+# variables.tf (not overridden in terraform/live/devtools/domain-controller/
+# terragrunt.hcl) — the AD security group ad-bootstrap.ps1.tftpl creates
+# under the OU, with the LDAP bind account as its one Terraform-managed
+# member. Anyone else added to this AD group becomes a Bitbucket admin the
+# next time the LDAP directory syncs, via the global permission this script
+# grants in step 4.
+AD_ADMIN_GROUP="${AD_ADMIN_GROUP:-devops-tashtiot}"
 
 ssm_get() {
   aws ssm get-parameter --name "$1" --with-decryption \
@@ -40,14 +52,15 @@ ssm_get() {
 echo "############################################################################"
 echo "# Bitbucket post-deployment setup"
 echo "#"
-echo "# Three things need to happen before Bitbucket is fully usable:"
+echo "# Four things need to happen before Bitbucket is fully usable:"
 echo "#   1. Connect it to the platform's AD directory (manual, in the browser)"
 echo "#   2. Turn on SSO via RHBK (manual, in the browser)"
 echo "#   3. Issue an API token for devops-api's Git integration (this script does it)"
+echo "#   4. Grant the Terraform-created AD group admin on Bitbucket (this script does it)"
 echo "#"
 echo "# This script fetches every value you need for 1 & 2 from SSM and prints"
 echo "# it below with an explanation of what it is and where it goes. It then"
-echo "# offers to actually create the token for step 3."
+echo "# offers to actually run steps 3 and 4."
 echo "############################################################################"
 echo
 echo "== Fetching values from SSM =="
@@ -215,7 +228,7 @@ EOF
 # ----------------------------------------------------------------------------
 echo
 echo "############################################################################"
-echo "# STEP 3 of 3 — API Token for devops-api (this script does this part)"
+echo "# STEP 3 of 4 — API Token for devops-api (this script does this part)"
 echo "############################################################################"
 cat <<EOF
 
@@ -303,20 +316,83 @@ aws ssm put-parameter --name "$TOKEN_SSM_PARAM" --type SecureString \
   --description "Category: postdeploy. Not managed by GitOps/Terraform — created and rotated manually (see scripts/bitbucket-post-deploy.sh)."
 
 echo
+echo "  [x] Token \"${TOKEN_NAME}\" created in Bitbucket for user '${BITBUCKET_ADMIN_USER}'"
+echo "  [x] Published to SSM at ${TOKEN_SSM_PARAM}"
+echo "  [ ] devops-api will pick it up on its ExternalSecret's next refresh —"
+echo "      nothing further to do; check its pod logs if it doesn't seem to be"
+echo "      authenticating within a few minutes of this run."
+
+# ----------------------------------------------------------------------------
+echo
+echo "############################################################################"
+echo "# STEP 4 of 4 — Grant the Terraform-created AD group admin on Bitbucket"
+echo "############################################################################"
+cat <<EOF
+
+devtools-labs' domain-controller module creates an AD security group
+("${AD_ADMIN_GROUP}") under the OU, with the LDAP bind
+account as its one Terraform-managed member — anyone else added to that
+AD group by hand becomes a Bitbucket admin, once both this step's global
+permission grant is in place AND the LDAP directory (Step 1) has synced
+that group into Bitbucket at least once. Order matters: if this step runs
+before the group has ever synced, Bitbucket has no such group to grant a
+permission to yet, and the call below fails.
+EOF
+echo
+read -r -p "Grant AD group '${AD_ADMIN_GROUP}' global ADMIN on Bitbucket now? [y/N] " CONFIRM
+if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+  echo "Skipped. Re-run this script when ready, once Step 1's directory sync has run at least once."
+  exit 0
+fi
+
+GROUP_RESPONSE=$(curl -sk -u "${BITBUCKET_ADMIN_USER}:${ADMIN_PASS}" \
+  -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+  -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+  -w '\nHTTP_STATUS:%{http_code}' \
+  -X PUT \
+  "${BITBUCKET_URL}/rest/api/1.0/admin/permissions/groups?name=${AD_ADMIN_GROUP}&permission=ADMIN")
+
+GROUP_HTTP_STATUS=$(echo "$GROUP_RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+GROUP_BODY=$(echo "$GROUP_RESPONSE" | sed 's/HTTP_STATUS:[0-9]*$//')
+
+if [ "$GROUP_HTTP_STATUS" = "204" ] || [ "$GROUP_HTTP_STATUS" = "200" ]; then
+  echo
+  echo "  [x] AD group '${AD_ADMIN_GROUP}' granted global ADMIN on Bitbucket"
+elif echo "$GROUP_BODY" | grep -q "Basic Authentication has been disabled"; then
+  cat <<EOF
+
+FAILED: Basic Authentication is disabled on this instance. Enable it
+first (see Step 3's failure message above for the exact steps), then
+re-run this script.
+EOF
+  exit 1
+elif echo "$GROUP_BODY" | grep -qi "does not exist\|not found"; then
+  cat <<EOF
+
+FAILED: Bitbucket doesn't know about the group "${AD_ADMIN_GROUP}" yet.
+This means Step 1's LDAP directory sync hasn't run (or hasn't completed)
+— go finish the directory setup and run a sync first, then re-run this
+script.
+EOF
+  exit 1
+else
+  echo
+  echo "FAILED (HTTP $GROUP_HTTP_STATUS). Bitbucket's raw response was:"
+  echo "$GROUP_BODY"
+  exit 1
+fi
+
+echo
 echo "############################################################################"
 echo "# Done"
 echo "############################################################################"
 cat <<EOF
-
-  [x] Token "${TOKEN_NAME}" created in Bitbucket for user '${BITBUCKET_ADMIN_USER}'
-  [x] Published to SSM at ${TOKEN_SSM_PARAM}
-  [ ] devops-api will pick it up on its ExternalSecret's next refresh —
-      nothing further to do; check its pod logs if it doesn't seem to be
-      authenticating within a few minutes of this run.
 
 Steps 1 and 2 above still need you in the browser — everything you need
 for both is printed above this. Once the directory sync (Step 1) and SSO
 (Step 2) are done, you can verify:
   - Directory: log out, log back in with an AD username/password
   - SSO: the login page should now also show a "Log in with RHBK" option
+  - Admin group: an AD user who is a member of "${AD_ADMIN_GROUP}" should
+    see Bitbucket's Administration menu after their next login
 EOF

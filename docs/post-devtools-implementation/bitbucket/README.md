@@ -6,6 +6,7 @@ release, these manual steps remain before it's fully usable:
 1. **User Directory (LDAP/AD)** — one-time admin UI configuration
 2. **SSO (RHBK/OIDC)** — optional, on top of the directory above
 3. **API Token for devops-api** — required for `devops-api`'s Git integration
+4. **Admin group grant** — grants the Terraform-created AD group global admin on Bitbucket
 
 No setup-wizard step is listed here because, unlike Jira/Confluence,
 Bitbucket's license and first admin account are both fully automated: the
@@ -158,3 +159,32 @@ aws ssm put-parameter --name /devops/postdeploy/bitbucket/api-token --type Secur
 Not GitOps-managed — rotate it the same way (manual `put-parameter`). The
 parameter's own description already reflects this: "Not managed by
 GitOps/Terraform — created and rotated manually."
+
+---
+
+## 4. Admin Group Grant
+
+`devtools-labs/terraform/modules/domain-controller` creates an AD security
+group (`devops-tashtiot`, its `ad_group_name` variable's default) under the
+OU, with the LDAP bind account as its one Terraform-managed member. Anyone
+else added to that AD group by hand becomes a Bitbucket admin — but only
+once **both** of these are true:
+
+1. Bitbucket's LDAP directory (Step 1) has synced at least once, so the
+   group actually exists in Bitbucket.
+2. That group has been granted Bitbucket's global `ADMIN` permission.
+
+`scripts/bitbucket-post-deploy.sh` automates step 2 via Bitbucket's REST
+API (same Basic-Auth prerequisite as the API token step above):
+```bash
+curl -u admin:<admin-password> \
+  -H "CF-Access-Client-Id: <client-id>" -H "CF-Access-Client-Secret: <client-secret>" \
+  -X PUT "https://bitbucket.devopstashtiot.page/rest/api/1.0/admin/permissions/groups?name=devops-tashtiot&permission=ADMIN"
+```
+Order matters: run this only after the directory sync in Step 1 has
+actually run — Bitbucket has no group to grant a permission to otherwise,
+and the call fails with a "does not exist" error.
+
+To do it by hand instead: Administration → Security → Global permissions
+→ search for the `devops-tashtiot` group → set its permission to
+**Admin**.
