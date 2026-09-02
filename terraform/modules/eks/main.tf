@@ -264,94 +264,27 @@ resource "kubernetes_storage_class" "efs" {
   depends_on = [aws_efs_mount_target.shared_home]
 }
 
-# Per-devtool EFS StorageClasses, each with a FIXED uid/gid matching that
-# devtool's actual process user (bitbucket=2003, confluence=2002, jira=2001
-# — confirmed live via `getent passwd` in each pod). efs-sc above leaves
-# uid/gid unset, so the EFS CSI driver falls back to its own gidRangeStart
-# default (50000) and hands out 50000, 50001, 50002... sequentially to
-# whichever PVC asks first — nothing to do with any devtool's real identity.
-# Access Point identity enforcement is *always* applied for dynamic
-# provisioning (confirmed against the driver's own docs) regardless of what
-# uid/gid is configured — even root inside the pod can't chown around a
-# mismatched one, confirmed live 2026-09-01 ("Operation not permitted" on a
-# plain `chown -R` against an efs-sc-provisioned volume). Baking in the
-# correct identity here instead of trying to fix it after provisioning means
-# a fresh PVC is correctly owned from the moment it's created — no
-# chown/safe.directory workaround ever needed, and this self-heals
-# correctly on a genuinely fresh volume (e.g. disaster recovery) the way a
-# manually-created PV never would.
-resource "kubernetes_storage_class" "efs_bitbucket" {
-  metadata {
-    name = "efs-sc-bitbucket"
-  }
-
-  storage_provisioner = "efs.csi.aws.com"
-  reclaim_policy      = "Retain"
-
-  parameters = {
-    provisioningMode = "efs-ap"
-    fileSystemId     = aws_efs_file_system.shared_home.id
-    directoryPerms   = "700"
-    uid              = "2003"
-    gid              = "2003"
-  }
-
-  depends_on = [aws_efs_mount_target.shared_home]
-}
-
-resource "kubernetes_storage_class" "efs_confluence" {
-  metadata {
-    name = "efs-sc-confluence"
-  }
-
-  storage_provisioner = "efs.csi.aws.com"
-  reclaim_policy      = "Retain"
-
-  parameters = {
-    provisioningMode = "efs-ap"
-    fileSystemId     = aws_efs_file_system.shared_home.id
-    directoryPerms   = "700"
-    uid              = "2002"
-    gid              = "2002"
-  }
-
-  depends_on = [aws_efs_mount_target.shared_home]
-}
-
-resource "kubernetes_storage_class" "efs_jira" {
-  metadata {
-    name = "efs-sc-jira"
-  }
-
-  storage_provisioner = "efs.csi.aws.com"
-  reclaim_policy      = "Retain"
-
-  parameters = {
-    provisioningMode = "efs-ap"
-    fileSystemId     = aws_efs_file_system.shared_home.id
-    directoryPerms   = "700"
-    uid              = "2001"
-    gid              = "2001"
-  }
-
-  depends_on = [aws_efs_mount_target.shared_home]
-}
-
-# ── Base-path-scoped dynamic EFS provisioning, as an alternative to the
-# efs-sc-* dynamic StorageClasses above. Still fully dynamic — a PVC against
-# one of these StorageClasses gets a freshly created Access Point AND PV
-# automatically, exactly like efs-sc-bitbucket does today — but `basePath`
-# roots every Access Point this class provisions under a fixed, named
-# directory (e.g. /bitbucket/pvc-<uuid>) instead of the filesystem root
-# (/pvc-<uuid>). No access point or PV needs to be pre-created: EFS's own
-# CreateAccessPoint API creates any missing parent directories in the path
-# (here, /bitbucket itself) the first time it's asked to, using the same
-# uid/gid/permissions enforcement as the existing efs-sc-* classes.
+# ── Base-path-scoped dynamic EFS provisioning for bitbucket/confluence/jira
+# shared-home. Fully dynamic — a PVC against one of these StorageClasses gets
+# a freshly created Access Point AND PV automatically — but `basePath` roots
+# every Access Point this class provisions under a fixed, named directory
+# (e.g. /bitbucket/pvc-<uuid>) instead of the filesystem root (/pvc-<uuid>).
+# No access point or PV needs to be pre-created: EFS's own CreateAccessPoint
+# API creates any missing parent directories in the path (here, /bitbucket
+# itself) the first time it's asked to. uid/gid are each devtool's actual
+# process user (bitbucket=2003, confluence=2002, jira=2001 — confirmed live
+# via `getent passwd` in each pod); Access Point identity enforcement is
+# *always* applied for dynamic provisioning regardless of what uid/gid is
+# configured — even root inside the pod can't chown around a mismatched one
+# (confirmed live 2026-09-01: "Operation not permitted" on a plain
+# `chown -R`). Baking in the correct identity here means a fresh PVC is
+# correctly owned from the moment it's created — no chown/safe.directory
+# workaround ever needed.
 #
-# Each app's PVC lands under a FRESH base path (/bitbucket, /confluence,
-# /jira) — not the existing pvc-<uuid> directories the efs-sc-* classes
-# already provisioned, which still hold live data (retained, just no longer
-# mounted once each app's PVC is repointed here).
+# These previously replaced efs-sc-bitbucket/efs-sc-confluence/efs-sc-jira
+# (root-level dynamic provisioning, no basePath) — removed 2026-09-02 once
+# nothing referenced them. Their old pvc-<uuid> directories still exist on
+# the filesystem (Retain), just unmounted.
 resource "kubernetes_storage_class" "efs_static_bitbucket" {
   metadata {
     name = "efs-static-bitbucket"
