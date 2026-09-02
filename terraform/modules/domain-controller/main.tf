@@ -182,3 +182,15 @@ resource "aws_ssm_parameter" "base_dn" {
   value       = local.base_dn
   tags        = local.ssm_tags
 }
+
+# AD admin-grant group name, published so consumers (scripts/bitbucket-post-deploy.sh's
+# Step 5) read the current value instead of hardcoding a literal duplicate of
+# ad_group_name that would silently drift if that variable is ever changed.
+resource "aws_ssm_parameter" "ad_group_name" {
+  count       = var.instance_enabled ? 1 : 0
+  name        = var.ad_group_name_ssm_parameter
+  description = "Category: terraform-created. Created by GitOps — devtools-labs Terraform (terraform/modules/domain-controller). Do not edit manually; changes will be reverted on the next apply. Name of the AD security group (var.ad_group_name) whose members get Bitbucket global ADMIN via scripts/bitbucket-post-deploy.sh's Step 5. To change: edit ad_group_name in terraform/live/devtools/domain-controller/terragrunt.hcl and re-apply."
+  type        = "String"
+  value       = var.ad_group_name
+  tags        = local.ssm_tags
+}

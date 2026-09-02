@@ -4,25 +4,36 @@ set -euo pipefail
 # Post-deployment setup for Bitbucket — guided walkthrough + automation.
 # Full narrative: devtools-labs/docs/post-devtools-implementation/bitbucket/README.md
 #
-# Bitbucket Data Center has no REST API for either the AD/LDAP directory or
-# the SSO (OIDC) admin screens — both are UI-only, same as Jira/Confluence.
-# So this script does two things:
-#   1. Fetches every value those two screens need from SSM and walks you
-#      through exactly what to type where and why, field by field, so
-#      you're never guessing or hunting for a parameter name mid-wizard.
-#   2. Fully automates steps 3 and 4 via Bitbucket's REST API, which *is*
+# Bitbucket Data Center has no REST API for the AD/LDAP directory screen,
+# the SSO (OIDC) screen, OR the "Allow basic authentication on API calls"
+# toggle under Authentication methods (confirmed against Atlassian's own
+# configuration-properties docs — no bitbucket.properties key exists for
+# it either) — all three are UI-only, same as Jira/Confluence's directory
+# and SSO screens. So this script does two things:
+#   1. Fetches every value those screens need from SSM and walks you
+#      through exactly what to type/click where and why, field by field,
+#      so you're never guessing or hunting for a parameter name mid-wizard
+#      — including a live PROBE, in Step 2, that tells you right away
+#      whether Basic Authentication still needs enabling, before you're
+#      deep into Steps 4-5 which actually depend on it.
+#   2. Fully automates steps 4 and 5 via Bitbucket's REST API, which *is*
 #      scriptable for both: creates/rotates a Personal Access Token for
-#      devops-api and publishes it to SSM (step 3), and grants the
-#      Terraform-created AD group global ADMIN on Bitbucket (step 4).
-#      Steps 1/2 only print instructions, since there's no API for this
+#      devops-api and publishes it to SSM (step 4), and grants the
+#      Terraform-created AD group global ADMIN on Bitbucket (step 5).
+#      Steps 1/2/3 only print instructions, since there's no API for this
 #      script to drive instead.
 #
+# Walks through steps ONE AT A TIME: each step's instructions print, then
+# the script pauses and waits for you to confirm you're done before the
+# next step's instructions print — so you're never scrolling back through
+# a wall of output trying to figure out which step you're on.
+#
 # Idempotent throughout:
-#   - Step 3 rotates the token in place (Bitbucket's access-tokens API
+#   - Step 4 rotates the token in place (Bitbucket's access-tokens API
 #     treats the token "name" as the identity — PUTting the same name
 #     again replaces the previous token rather than creating a duplicate),
 #     and re-publishing to SSM with --overwrite is safe to repeat.
-#   - Step 4's PUT on /rest/api/1.0/admin/permissions/groups sets the
+#   - Step 5's PUT on /rest/api/1.0/admin/permissions/groups sets the
 #     group's permission to exactly ADMIN regardless of its prior value —
 #     safe to re-run.
 
@@ -35,32 +46,31 @@ BITBUCKET_ADMIN_USER="${BITBUCKET_ADMIN_USER:-admin}"
 TOKEN_NAME="${TOKEN_NAME:-devops-api}"
 TOKEN_PERMISSIONS="${TOKEN_PERMISSIONS:-REPO_WRITE}"
 TOKEN_SSM_PARAM="/devops/postdeploy/bitbucket/api-token"
-# Matches ad_group_name's default in terraform/modules/domain-controller/
-# variables.tf (not overridden in terraform/live/devtools/domain-controller/
-# terragrunt.hcl) — the AD security group ad-bootstrap.ps1.tftpl creates
-# under the OU, with the LDAP bind account as its one Terraform-managed
-# member. Anyone else added to this AD group becomes a Bitbucket admin the
-# next time the LDAP directory syncs, via the global permission this script
-# grants in step 4.
-AD_ADMIN_GROUP="${AD_ADMIN_GROUP:-devops-tashtiot}"
 
 ssm_get() {
   aws ssm get-parameter --name "$1" --with-decryption \
     --query 'Parameter.Value' --output text
 }
 
+confirm_step() {
+  echo
+  read -r -p "Press Enter once you've completed Step $1 above (or Ctrl+C to stop here and resume later)... "
+}
+
 echo "############################################################################"
 echo "# Bitbucket post-deployment setup"
 echo "#"
-echo "# Four things need to happen before Bitbucket is fully usable:"
+echo "# Five things need to happen before Bitbucket is fully usable:"
 echo "#   1. Connect it to the platform's AD directory (manual, in the browser)"
-echo "#   2. Turn on SSO via RHBK (manual, in the browser)"
-echo "#   3. Issue an API token for devops-api's Git integration (this script does it)"
-echo "#   4. Grant the Terraform-created AD group admin on Bitbucket (this script does it)"
+echo "#   2. Enable Basic Authentication (checked live — script can't flip it)"
+echo "#   3. Turn on SSO via RHBK (manual, in the browser)"
+echo "#   4. Issue an API token for devops-api's Git integration (this script does it)"
+echo "#   5. Grant the Terraform-created AD group admin on Bitbucket (this script does it)"
 echo "#"
-echo "# This script fetches every value you need for 1 & 2 from SSM and prints"
-echo "# it below with an explanation of what it is and where it goes. It then"
-echo "# offers to actually run steps 3 and 4."
+echo "# This script fetches every value you need for 1-3 from SSM and prints"
+echo "# it below with an explanation of what it is and where it goes, one step"
+echo "# at a time — it pauses after each one for you to confirm before moving"
+echo "# on. It then offers to actually run steps 4 and 5."
 echo "############################################################################"
 echo
 echo "== Fetching values from SSM =="
@@ -77,19 +87,53 @@ OIDC_SECRET=$(ssm_get /devops/terraform-created/rhbk/oidc-client-secret)
 # aws_ssm_parameter.base_dn for why this is deliberately not the narrower
 # OU-scoped DN.
 BASE_DN=$(ssm_get /devops/terraform-created/domain-controller/base-dn)
+# The AD security group ad-bootstrap.ps1.tftpl creates under the OU, with
+# the LDAP bind account as its one Terraform-managed member. Anyone else
+# added to this AD group becomes a Bitbucket admin the next time the LDAP
+# directory syncs, via the global permission this script grants in step 5.
+# Read from SSM (terraform/modules/domain-controller's aws_ssm_parameter.
+# ad_group_name) instead of a hardcoded literal, so this script always
+# matches whatever ad_group_name is currently set to in
+# terraform/live/devtools/domain-controller/terragrunt.hcl.
+AD_ADMIN_GROUP=$(ssm_get /devops/terraform-created/domain-controller/ad-group-name)
+# Getting this value into the k8s Secret is automated (ExternalSecret into
+# bitbucket.license.secretName/secretKey, devtools-provision/devtools/
+# bitbucket/values.yaml), but actually applying it in Bitbucket's UI
+# (Administration -> Licenses) is a manual step done alongside Step 1 —
+# there's no setup-wizard screen for it the way Jira has, so it's printed
+# here rather than getting its own step.
+BITBUCKET_LICENSE=$(ssm_get /devops/prerequisite/bitbucket/license)
 
 LDAP_HOST="${LDAP_URL#ldap://}"
 LDAP_HOST="${LDAP_HOST%%:*}"
 LDAP_BIND_UPN="${LDAP_BIND_USER}@devtools.local"
+
+# Fetched here (not just before Step 4 as before) so Step 2's live probe
+# below can use them too — bitbucket.devopstashtiot.page sits behind
+# Cloudflare Access like every other *.devopstashtiot.page hostname, so any
+# curl from outside the cluster (this script, running on a laptop/CI) needs
+# these service-token headers alongside Bitbucket's own auth or it just
+# gets 302'd to the Access email-OTP login page before reaching Bitbucket.
+CF_ACCESS_CLIENT_ID=$(ssm_get /devops/terraform-created/cloudflare/wildcard-access-otp-bypass-client-id)
+CF_ACCESS_CLIENT_SECRET=$(ssm_get /devops/terraform-created/cloudflare/wildcard-access-otp-bypass-client-secret)
 
 echo "Done. All values below are fetched live — always current, never stale."
 
 # ----------------------------------------------------------------------------
 echo
 echo "############################################################################"
-echo "# STEP 1 of 3 — Connect Bitbucket to the AD Directory"
+echo "# STEP 1 of 5 — Connect Bitbucket to the AD Directory"
 echo "############################################################################"
 cat <<EOF
+
+License — paste this in yourself at Administration -> Licenses:
+    ${BITBUCKET_LICENSE}
+
+    -> Sourced from /devops/prerequisite/bitbucket/license. Same as every
+       other license on this platform: getting it into the k8s Secret is
+       automated (ExternalSecret into bitbucket.license.secretName/secretKey,
+       devtools-provision/devtools/bitbucket/values.yaml), but actually
+       applying it in Bitbucket's UI is a manual step you do here.
 
 Log in to Bitbucket as '${BITBUCKET_ADMIN_USER}' at:
     ${BITBUCKET_URL}/admin
@@ -153,6 +197,16 @@ ADVANCED SETTINGS -> ENABLE NESTED GROUPS
 --------------------------------------------------------------------------
   Enable Nested Groups   :  CHECKED (on)
 
+--------------------------------------------------------------------------
+ADVANCED SETTINGS -> LDAP CONNECTION POOLING
+--------------------------------------------------------------------------
+  LDAP Connection Pool   :  JNDI (not Dynamic pool)
+               -> JNDI is Atlassian's legacy pooling type, configured
+                  globally (JVM system properties in setenv.sh, not
+                  per-directory). Dynamic pool is the newer alternative
+                  with more per-directory tuning knobs. This platform
+                  uses JNDI on every directory, not Dynamic pool.
+
 Everything else on this form (schema mapping, Follow Referrals, etc.) is
 already correct at Bitbucket's own defaults for a Microsoft Active
 Directory directory type — nothing else needs changing.
@@ -160,11 +214,52 @@ Directory directory type — nothing else needs changing.
 Click "Test retrieve user", then save the directory and run a directory
 sync so users/groups actually populate.
 EOF
+confirm_step 1
 
 # ----------------------------------------------------------------------------
 echo
 echo "############################################################################"
-echo "# STEP 2 of 3 — Turn on SSO via RHBK"
+echo "# STEP 2 of 5 — Enable Basic Authentication (checked live, below)"
+echo "############################################################################"
+cat <<EOF
+
+There is no REST API or bitbucket.properties setting for this — it is a
+pure UI-only checkbox (same category of platform limitation as the
+LDAP/SSO screens), so this script cannot flip it for you. What it CAN do
+is check right now whether you still need to.
+EOF
+
+PROBE_RESPONSE=$(curl -sk -u "${BITBUCKET_ADMIN_USER}:${ADMIN_PASS}" \
+  -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+  -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+  "${BITBUCKET_URL}/rest/access-tokens/1.0/users/${BITBUCKET_ADMIN_USER}" 2>/dev/null || true)
+
+if echo "$PROBE_RESPONSE" | grep -q "Basic Authentication has been disabled"; then
+  cat <<EOF
+
+  [ ] Basic Authentication is currently DISABLED on this instance.
+      Steps 4 and 5 (the parts this script automates) will fail until
+      you enable it, one time, in the browser:
+
+          Administration -> Accounts -> Authentication methods
+            -> next to the default method: Actions -> Edit
+            -> check "Allow basic authentication on API calls"
+            -> Save configuration
+
+      Same setting the parent CLAUDE.md's Gotcha 3 documents — also
+      required for the laptop \`git push\` pattern documented there. Do
+      this now, then confirm below once it's done.
+EOF
+else
+  echo
+  echo "  [x] Basic Authentication is already enabled — Steps 4-5 below will work as-is."
+fi
+confirm_step 2
+
+# ----------------------------------------------------------------------------
+echo
+echo "############################################################################"
+echo "# STEP 3 of 5 — Turn on SSO via RHBK"
 echo "############################################################################"
 cat <<EOF
 
@@ -223,12 +318,28 @@ Atlassian Marketplace app). Fill in:
 Note this only proves WHO logged in — it does not carry project/repo
 permissions. Those still come entirely from the LDAP directory's group
 sync in Step 1, independent of SSO.
+
+IF YOU SEE "We couldn't fetch the data from your identity provider. Fill
+these fields manually.": this is a real, confirmed platform gap, not
+something wrong with your setup — ingress-nginx presents a Cloudflare
+Origin CA certificate (only meant to be trusted by Cloudflare's edge, not
+generic clients), so Bitbucket's own backend HTTPS call to fetch RHBK's
+OIDC discovery document fails certificate validation, even though RHBK
+itself is fully reachable and healthy. Fill the fields in yourself:
+
+  Issuer                        :  https://rhbk.devopstashtiot.page/realms/devtools
+  Authorization endpoint        :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/auth
+  Token endpoint                :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/token
+  User info endpoint            :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/userinfo
+  JWK Set URL                   :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/certs
+  Logout/end-session endpoint   :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/logout
 EOF
+confirm_step 3
 
 # ----------------------------------------------------------------------------
 echo
 echo "############################################################################"
-echo "# STEP 3 of 4 — API Token for devops-api (this script does this part)"
+echo "# STEP 4 of 5 — API Token for devops-api (this script does this part)"
 echo "############################################################################"
 cat <<EOF
 
@@ -244,16 +355,8 @@ to: ${TOKEN_PERMISSIONS} — then publishes it straight to SSM at
 ${TOKEN_SSM_PARAM}.
 
 PREREQUISITE — Basic Authentication must be enabled on this instance
-first, or this call fails with 403 "Basic Authentication has been
-disabled on this instance." (confirmed by direct probe; it's off by
-default on a fresh Bitbucket DC install, not something this platform
-turned off deliberately). One-time fix, in the browser:
-    Administration -> Accounts -> Authentication methods
-      -> next to the default method: Actions -> Edit
-      -> check "Allow basic authentication on API calls"
-      -> Save configuration
-Same setting the parent CLAUDE.md's Gotcha 3 documents — also required
-for the laptop \`git push\` pattern documented there.
+first (see Step 2's live check above), or this call fails with 403
+"Basic Authentication has been disabled on this instance."
 EOF
 echo
 read -r -p "Attempt to create/rotate the '${TOKEN_NAME}' access token now? [y/N] " CONFIRM
@@ -261,18 +364,6 @@ if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
   echo "Skipped. Re-run this script when ready, or do it manually per the README."
   exit 0
 fi
-
-# bitbucket.devopstashtiot.page sits behind Cloudflare Access, same as every
-# other *.devopstashtiot.page hostname — a plain curl with only Bitbucket's
-# own Basic Auth gets intercepted at Cloudflare's edge and 302'd to the
-# email-OTP login page before it ever reaches Bitbucket. Calling in from
-# outside the cluster (this script, running on a laptop/CI, not from an
-# in-cluster caller that bypasses Access via the CoreDNS rewrites) needs the
-# CF-Access-Client-Id/CF-Access-Client-Secret service-token headers too,
-# alongside Bitbucket's own auth — same pattern the parent CLAUDE.md
-# documents for `git push` from outside the cluster.
-CF_ACCESS_CLIENT_ID=$(ssm_get /devops/terraform-created/cloudflare/wildcard-access-otp-bypass-client-id)
-CF_ACCESS_CLIENT_SECRET=$(ssm_get /devops/terraform-created/cloudflare/wildcard-access-otp-bypass-client-secret)
 
 RESPONSE=$(curl -sk -u "${BITBUCKET_ADMIN_USER}:${ADMIN_PASS}" \
   -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
@@ -321,11 +412,12 @@ echo "  [x] Published to SSM at ${TOKEN_SSM_PARAM}"
 echo "  [ ] devops-api will pick it up on its ExternalSecret's next refresh —"
 echo "      nothing further to do; check its pod logs if it doesn't seem to be"
 echo "      authenticating within a few minutes of this run."
+confirm_step 4
 
 # ----------------------------------------------------------------------------
 echo
 echo "############################################################################"
-echo "# STEP 4 of 4 — Grant the Terraform-created AD group admin on Bitbucket"
+echo "# STEP 5 of 5 — Grant the Terraform-created AD group admin on Bitbucket"
 echo "############################################################################"
 cat <<EOF
 
@@ -362,7 +454,7 @@ elif echo "$GROUP_BODY" | grep -q "Basic Authentication has been disabled"; then
   cat <<EOF
 
 FAILED: Basic Authentication is disabled on this instance. Enable it
-first (see Step 3's failure message above for the exact steps), then
+first (see Step 2's failure message above for the exact steps), then
 re-run this script.
 EOF
   exit 1
@@ -388,9 +480,9 @@ echo "# Done"
 echo "############################################################################"
 cat <<EOF
 
-Steps 1 and 2 above still need you in the browser — everything you need
-for both is printed above this. Once the directory sync (Step 1) and SSO
-(Step 2) are done, you can verify:
+Steps 1 and 3 above still needed you in the browser — everything you
+needed for both was printed above. Once the directory sync (Step 1) and
+SSO (Step 3) are done, you can verify:
   - Directory: log out, log back in with an AD username/password
   - SSO: the login page should now also show a "Log in with RHBK" option
   - Admin group: an AD user who is a member of "${AD_ADMIN_GROUP}" should

@@ -130,6 +130,12 @@ variable "ad_group_name" {
   default     = "devops-tashtiot"
 }
 
+variable "ad_group_name_ssm_parameter" {
+  description = "SSM Parameter Store path (plain String, not a secret) holding ad_group_name — lets consumers (e.g. scripts/bitbucket-post-deploy.sh) read the current group name instead of hardcoding a literal that could drift from this variable."
+  type        = string
+  default     = "/devops/terraform-created/domain-controller/ad-group-name"
+}
+
 variable "ad_group_member_username" {
   description = "sAMAccountName added as a member of ad_group_name."
   type        = string

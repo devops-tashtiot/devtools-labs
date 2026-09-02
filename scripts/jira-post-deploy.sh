@@ -5,9 +5,13 @@ set -euo pipefail
 # Full narrative: devtools-labs/docs/post-devtools-implementation/jira/README.md
 #
 # Unlike Bitbucket, Jira has no post-deploy step this script can actually
-# automate via API (no equivalent of the devops-api access token) — both the
-# setup wizard and the LDAP/SSO admin screens are UI-only. This script's job
-# is purely to fetch every value those screens need from SSM and walk you
+# automate via API — both the setup wizard and the LDAP/SSO admin screens
+# are UI-only, and (confirmed against Jira's own OpenAPI spec,
+# jira_software_dc_11000_swagger.v3.json) it has NO global-permissions REST
+# endpoint at all — not even read-only. Its /api/2/group/user endpoint only
+# adds individual USERS to a group, never a group to a group, and there is
+# no "globalpermission" path anywhere in the spec. This script's job is
+# purely to fetch every value the UI screens need from SSM and walk you
 # through exactly what to type where and why, so you're never guessing or
 # hunting for a parameter name mid-wizard.
 #
@@ -16,6 +20,11 @@ set -euo pipefail
 # docs — no equivalent of Bitbucket/Confluence's licenseSsmParameter wiring
 # exists for Jira) — the license has to be pasted into the wizard by hand,
 # which is why this script fetches and prints it, unlike the other two.
+#
+# Walks through steps ONE AT A TIME: each step's instructions print, then
+# the script pauses and waits for you to confirm you're done before the
+# next step's instructions print — so you're never scrolling back through
+# a wall of output trying to figure out which step you're on.
 
 AWS_PROFILE="${AWS_PROFILE:-342831714456_Workload-Admin-PS}"
 AWS_REGION="${AWS_REGION:-il-central-1}"
@@ -28,16 +37,27 @@ ssm_get() {
     --query 'Parameter.Value' --output text
 }
 
+confirm_step() {
+  echo
+  read -r -p "Press Enter once you've completed Step $1 above (or Ctrl+C to stop here and resume later)... "
+}
+
 echo "############################################################################"
 echo "# Jira post-deployment setup"
 echo "#"
-echo "# Three things need to happen before Jira is fully usable, all in the"
+echo "# Four things need to happen before Jira is fully usable, all in the"
 echo "# browser — this script has nothing it can automate via API here, only"
 echo "# values to hand you so you're not hunting for them mid-wizard:"
 echo "#   1. Finish the first-run setup wizard (license included — Jira has"
 echo "#      no auto-apply mechanism, unlike Bitbucket/Confluence)"
 echo "#   2. Connect it to the platform's AD directory"
 echo "#   3. Turn on SSO via RHBK"
+echo "#   4. Grant the Terraform-created AD group admin on Jira"
+echo "#      (manual — Jira's REST API has no global-permissions endpoint"
+echo "#      at all, not even read-only)"
+echo "#"
+echo "# Steps print one at a time — the script pauses after each for you to"
+echo "# confirm before moving on."
 echo "############################################################################"
 echo
 echo "== Fetching values from SSM =="
@@ -55,6 +75,11 @@ JIRA_LICENSE=$(ssm_get /devops/prerequisite/jira/license)
 # aws_ssm_parameter.base_dn for why this is deliberately not the narrower
 # OU-scoped DN.
 BASE_DN=$(ssm_get /devops/terraform-created/domain-controller/base-dn)
+# The AD security group ad-bootstrap.ps1.tftpl creates under the OU, with
+# the LDAP bind account as its one Terraform-managed member. Read from SSM
+# (terraform/modules/domain-controller's aws_ssm_parameter.ad_group_name)
+# instead of a hardcoded literal, matching bitbucket-post-deploy.sh.
+AD_ADMIN_GROUP=$(ssm_get /devops/terraform-created/domain-controller/ad-group-name)
 
 LDAP_HOST="${LDAP_URL#ldap://}"
 LDAP_HOST="${LDAP_HOST%%:*}"
@@ -80,6 +105,7 @@ hand:
 
   License key :  ${JIRA_LICENSE}
 EOF
+confirm_step 1
 
 # ----------------------------------------------------------------------------
 echo
@@ -127,98 +153,52 @@ CONNECTION SETTINGS
                   Base DN would make that user permanently invisible to
                   Jira (LDAP subtree search only reaches down from the
                   Base DN, never sideways). Accepted tradeoff: AD's own
-                  built-in accounts (Administrator, Guest, krbtgt) are
-                  also now in scope and will show up as syncable users —
-                  the User Object Filter below is left broad rather than
-                  excluding them.
+                  built-in accounts (Administrator, Guest, krbtgt) also
+                  come into scope, left unfiltered — the default User
+                  Object Filter is broad enough to include them.
 
 Click "Test Connection" here before moving on — if it fails, it's almost
 always the Hostname/Port/Username/Password above, not anything further
 down this form.
 
 --------------------------------------------------------------------------
-ADVANCED SETTINGS -> SCHEMA MAPPING -> USER SCHEMA
+ADVANCED SETTINGS -> ENABLE NESTED GROUPS
 --------------------------------------------------------------------------
-  User Object Class           :  user
-  User Object Filter          :  (sAMAccountName=*)
-  User Name Attribute         :  sAMAccountName
-  User Name RDN Attribute     :  cn
-  User First Name Attribute   :  givenName
-  User Last Name Attribute    :  sn
-  User Display Name Attribute :  displayName
-  User Email Attribute        :  mail
-  User Unique ID Attribute    :  objectGUID
-
-These are standard AD attribute names, not anything custom to this
-platform — you'd type the same values connecting any Atlassian DC product
-to any AD domain.
+  Enable Nested Groups   :  CHECKED (on)
 
 --------------------------------------------------------------------------
-ADVANCED SETTINGS -> SCHEMA MAPPING -> GROUP SCHEMA
+ADVANCED SETTINGS -> LDAP CONNECTION POOLING
 --------------------------------------------------------------------------
-  Group Object Class          :  group
-  Group Object Filter         :  (objectCategory=Group)
-  Group Name Attribute        :  cn
-  Group Description Attribute :  description
+  LDAP Connection Pool   :  JNDI (not Dynamic pool)
+               -> JNDI is Atlassian's legacy pooling type, configured
+                  globally (JVM system properties in setenv.sh, not
+                  per-directory). Dynamic pool is the newer alternative
+                  with more per-directory tuning knobs. This platform
+                  uses JNDI on every directory, not Dynamic pool.
 
---------------------------------------------------------------------------
-ADVANCED SETTINGS -> SCHEMA MAPPING -> MEMBERSHIP SCHEMA
---------------------------------------------------------------------------
-  Group Members Attribute             :  member
-  Use the User Membership Attribute   :  "When finding the members of a group"
-               -> Deliberate, non-default: AD's group object already lists
-                  every member's DN in its own "member" attribute, more
-                  reliable to resolve from in a flat (non-nested) group
-                  structure than walking each user's own back-link
-                  attribute. RHBK's own LDAP federation resolves group
-                  membership the same way, keeping every integration on
-                  the platform consistent with each other.
+Everything else on this form (schema mapping, Follow Referrals, etc.) is
+already correct at Jira's own defaults for a Microsoft Active Directory
+directory type (same finding confirmed live against Bitbucket's identical
+Embedded Crowd directory screen; not independently re-verified against
+Jira specifically).
 
---------------------------------------------------------------------------
-ADVANCED SETTINGS -> "FOLLOW REFERRALS" — UNCHECK THIS, READ WHY
---------------------------------------------------------------------------
-  Follow Referrals   :  UNCHECKED (off)
+FALLBACK if "Test retrieve user" fails with something like
+UnknownHostException: devtools.local: uncheck "Follow Referrals" in this
+directory's Advanced Settings. AD sometimes answers with a referral to its
+own DNS name instead of the IP you configured, which nothing on this
+platform resolves. Safe to turn off — this platform's AD structure is
+flat (one OU, no nested domains/partitions), so there's nothing a
+referral would ever legitimately need to point at anyway.
 
-  This is the one setting most likely to trip you up, because every field
-  above can be entered correctly and the directory will still fail — on
-  the "Test retrieve user" button specifically, not on "Test Connection".
-
-  WHAT YOU'LL SEE IF YOU LEAVE IT CHECKED (the symptom):
-      org.springframework.ldap.PartialResultException: nested exception is
-      javax.naming.PartialResultException [Root exception is
-      javax.naming.CommunicationException: devtools.local:389 [Root
-      exception is java.net.UnknownHostException: devtools.local]]
-
-  WHY THIS HAPPENS:
-      Active Directory frequently answers an LDAP search with a
-      "referral" — a response that essentially says "the rest of this
-      search is at ldap://devtools.local/..." — even when you're already
-      querying the right domain controller directly by its IP. Normal AD
-      behavior around naming-context boundaries and paged searches, not a
-      sign anything is misconfigured on the connection itself.
-
-      If "Follow Referrals" is ON, Jira's LDAP client (Spring LDAP/JNDI
-      under the hood) dutifully tries to open a brand-new connection to
-      that referral target — AD's own DNS name ("devtools.local"), not
-      the IP address you configured above — and since nothing in this
-      platform resolves that DNS name, the connection attempt fails
-      outright with UnknownHostException.
-
-  THE FIX:
-      Uncheck "Follow Referrals" in this directory's Advanced Settings.
-      No downside here — this platform's AD structure is flat (one OU,
-      no nested domains/partitions), so there's nothing a referral would
-      ever legitimately need to point the client at anyway.
-
-Once Follow Referrals is off, click "Test retrieve user" again — it
-should now succeed. Save the directory, then run a directory sync so
-users/groups actually populate.
+Click "Test retrieve user", then save the directory and run a directory
+sync so users/groups actually populate.
 EOF
+confirm_step 2
 
 # ----------------------------------------------------------------------------
 echo
 echo "############################################################################"
-echo "# STEP 3 of 3 — Turn on SSO via RHBK"
+echo "# STEP 3 of 4 — Turn on SSO via RHBK"
 echo "############################################################################"
 cat <<EOF
 
@@ -281,6 +261,62 @@ install yourself. Fill in:
 Note this only proves WHO logged in — it does not carry project
 permissions/roles. Those still come entirely from the LDAP directory's
 group sync in Step 2, independent of SSO.
+
+IF YOU SEE "We couldn't fetch the data from your identity provider. Fill
+these fields manually.": this is a real, confirmed platform gap, not
+something wrong with your setup — ingress-nginx presents a Cloudflare
+Origin CA certificate (only meant to be trusted by Cloudflare's edge, not
+generic clients), so Jira's own backend HTTPS call to fetch RHBK's OIDC
+discovery document fails certificate validation, even though RHBK itself
+is fully reachable and healthy. Fill the fields in yourself:
+
+  Issuer                        :  https://rhbk.devopstashtiot.page/realms/devtools
+  Authorization endpoint        :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/auth
+  Token endpoint                :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/token
+  User info endpoint            :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/userinfo
+  JWK Set URL                   :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/certs
+  Logout/end-session endpoint   :  https://rhbk.devopstashtiot.page/realms/devtools/protocol/openid-connect/logout
+EOF
+confirm_step 3
+
+# ----------------------------------------------------------------------------
+echo
+echo "############################################################################"
+echo "# STEP 4 of 4 — Grant the Terraform-created AD group admin on Jira"
+echo "############################################################################"
+cat <<EOF
+
+Fully manual, no automation possible: confirmed directly against Jira's
+own OpenAPI spec that it has NO global-permissions REST endpoint at all —
+not even read-only (Bitbucket has a full grant/revoke API for this;
+Confluence at least has a read-only one; Jira has neither). Its
+/api/2/group/user endpoint only adds individual users to a group, never a
+group to a group.
+
+devtools-labs' domain-controller module creates an AD security group
+("${AD_ADMIN_GROUP}") under the OU, with the LDAP bind
+account as its one Terraform-managed member — anyone else added to that
+AD group by hand becomes a Jira admin, once both of these are true:
+  1. Jira's LDAP directory (Step 2) has synced at least once, so the
+     group actually exists in Jira.
+  2. That group has been granted Jira's "Jira Administrators" global
+     permission (below).
+
+Navigate to:
+    Administration (gear icon)  ->  System  ->  Security  ->
+    Global permissions
+
+Find the "${AD_ADMIN_GROUP}" group and grant it:
+    Jira Administrators
+
+(Not "Jira System Administrators" — that's a broader, more sensitive
+permission that also covers managing other admins; "Jira Administrators"
+is the standard admin-level grant, matching what Bitbucket's ADMIN and
+Confluence's "Confluence Administrator" already give this group there.)
+
+Order matters: if the LDAP directory sync in Step 2 hasn't run yet, the
+group won't be there to grant a permission to at all — go finish that
+first.
 EOF
 
 echo
