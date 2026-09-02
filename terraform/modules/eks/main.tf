@@ -37,6 +37,38 @@ module "eks" {
   endpoint_public_access = var.endpoint_public_access
   enable_irsa            = true
 
+  # terraform-aws-modules/eks/aws's default node security group only opens
+  # node-to-node traffic on ephemeral ports (1025-65535), DNS (53), and a
+  # handful of control-plane webhook ports — NOT arbitrary ports below 1025.
+  # Never mattered on the single-instance Minikube EC2 this cluster replaced
+  # (one node means every pod-to-pod call is local, never crosses a security
+  # group boundary), but on this real multi-node cluster it silently breaks
+  # any cross-node call to a Service listening below 1025 — concretely,
+  # ingress-nginx-controller's 80/443. Since every clusters-definition/
+  # clusters/rhbk/values.yaml-driven *.devopstashtiot.page hostname resolves
+  # in-cluster straight to that Service via the CoreDNS rewrite (coredns.tf),
+  # any backend-to-backend call to one of those hostnames (e.g. Confluence's
+  # own OIDC-discovery fetch against RHBK during SSO setup) times out unless
+  # the calling pod happens to land on the same node as the single
+  # ingress-nginx-controller replica. Confirmed live: a debug pod on a
+  # different node timed out connecting to the ingress-nginx-controller
+  # ClusterIP on both 80 and 443, while the SG's own rule set showed no
+  # matching ingress rule for either port. Self-referencing all-ports/all-
+  # protocols is the module's own documented fix for this exact gap, and
+  # matches this platform's actual trust model — no NetworkPolicies exist
+  # anywhere in the cluster, so there's already no intra-cluster traffic
+  # restriction to preserve by scoping this any narrower.
+  node_security_group_additional_rules = {
+    ingress_self_all = {
+      description = "Node to node all ports/protocols (required for cross-node ClusterIP traffic on ports below 1025, e.g. ingress-nginx 80/443 - see comment above)"
+      protocol    = "-1"
+      from_port   = 0
+      to_port     = 0
+      type        = "ingress"
+      self        = true
+    }
+  }
+
   upgrade_policy = {
     support_type = var.upgrade_policy
   }
@@ -229,6 +261,154 @@ resource "kubernetes_storage_class" "efs" {
   # provisioning to succeed later, not for this object's own creation) — no
   # module.eks reference here. See kubernetes_storage_class.gp3's comment
   # above for why a whole-module depends_on is dangerous with -target.
+  depends_on = [aws_efs_mount_target.shared_home]
+}
+
+# Per-devtool EFS StorageClasses, each with a FIXED uid/gid matching that
+# devtool's actual process user (bitbucket=2003, confluence=2002, jira=2001
+# — confirmed live via `getent passwd` in each pod). efs-sc above leaves
+# uid/gid unset, so the EFS CSI driver falls back to its own gidRangeStart
+# default (50000) and hands out 50000, 50001, 50002... sequentially to
+# whichever PVC asks first — nothing to do with any devtool's real identity.
+# Access Point identity enforcement is *always* applied for dynamic
+# provisioning (confirmed against the driver's own docs) regardless of what
+# uid/gid is configured — even root inside the pod can't chown around a
+# mismatched one, confirmed live 2026-09-01 ("Operation not permitted" on a
+# plain `chown -R` against an efs-sc-provisioned volume). Baking in the
+# correct identity here instead of trying to fix it after provisioning means
+# a fresh PVC is correctly owned from the moment it's created — no
+# chown/safe.directory workaround ever needed, and this self-heals
+# correctly on a genuinely fresh volume (e.g. disaster recovery) the way a
+# manually-created PV never would.
+resource "kubernetes_storage_class" "efs_bitbucket" {
+  metadata {
+    name = "efs-sc-bitbucket"
+  }
+
+  storage_provisioner = "efs.csi.aws.com"
+  reclaim_policy      = "Retain"
+
+  parameters = {
+    provisioningMode = "efs-ap"
+    fileSystemId     = aws_efs_file_system.shared_home.id
+    directoryPerms   = "700"
+    uid              = "2003"
+    gid              = "2003"
+  }
+
+  depends_on = [aws_efs_mount_target.shared_home]
+}
+
+resource "kubernetes_storage_class" "efs_confluence" {
+  metadata {
+    name = "efs-sc-confluence"
+  }
+
+  storage_provisioner = "efs.csi.aws.com"
+  reclaim_policy      = "Retain"
+
+  parameters = {
+    provisioningMode = "efs-ap"
+    fileSystemId     = aws_efs_file_system.shared_home.id
+    directoryPerms   = "700"
+    uid              = "2002"
+    gid              = "2002"
+  }
+
+  depends_on = [aws_efs_mount_target.shared_home]
+}
+
+resource "kubernetes_storage_class" "efs_jira" {
+  metadata {
+    name = "efs-sc-jira"
+  }
+
+  storage_provisioner = "efs.csi.aws.com"
+  reclaim_policy      = "Retain"
+
+  parameters = {
+    provisioningMode = "efs-ap"
+    fileSystemId     = aws_efs_file_system.shared_home.id
+    directoryPerms   = "700"
+    uid              = "2001"
+    gid              = "2001"
+  }
+
+  depends_on = [aws_efs_mount_target.shared_home]
+}
+
+# ── Base-path-scoped dynamic EFS provisioning, as an alternative to the
+# efs-sc-* dynamic StorageClasses above. Still fully dynamic — a PVC against
+# one of these StorageClasses gets a freshly created Access Point AND PV
+# automatically, exactly like efs-sc-bitbucket does today — but `basePath`
+# roots every Access Point this class provisions under a fixed, named
+# directory (e.g. /bitbucket/pvc-<uuid>) instead of the filesystem root
+# (/pvc-<uuid>). No access point or PV needs to be pre-created: EFS's own
+# CreateAccessPoint API creates any missing parent directories in the path
+# (here, /bitbucket itself) the first time it's asked to, using the same
+# uid/gid/permissions enforcement as the existing efs-sc-* classes.
+#
+# Each app's PVC lands under a FRESH base path (/bitbucket, /confluence,
+# /jira) — not the existing pvc-<uuid> directories the efs-sc-* classes
+# already provisioned, which still hold live data (retained, just no longer
+# mounted once each app's PVC is repointed here).
+resource "kubernetes_storage_class" "efs_static_bitbucket" {
+  metadata {
+    name = "efs-static-bitbucket"
+  }
+
+  storage_provisioner = "efs.csi.aws.com"
+  reclaim_policy      = "Retain"
+
+  parameters = {
+    provisioningMode = "efs-ap"
+    fileSystemId     = aws_efs_file_system.shared_home.id
+    directoryPerms   = "700"
+    basePath         = "/bitbucket"
+    uid              = "2003"
+    gid              = "2003"
+  }
+
+  depends_on = [aws_efs_mount_target.shared_home]
+}
+
+resource "kubernetes_storage_class" "efs_static_confluence" {
+  metadata {
+    name = "efs-static-confluence"
+  }
+
+  storage_provisioner = "efs.csi.aws.com"
+  reclaim_policy      = "Retain"
+
+  parameters = {
+    provisioningMode = "efs-ap"
+    fileSystemId     = aws_efs_file_system.shared_home.id
+    directoryPerms   = "700"
+    basePath         = "/confluence"
+    uid              = "2002"
+    gid              = "2002"
+  }
+
+  depends_on = [aws_efs_mount_target.shared_home]
+}
+
+resource "kubernetes_storage_class" "efs_static_jira" {
+  metadata {
+    name = "efs-static-jira"
+  }
+
+  storage_provisioner = "efs.csi.aws.com"
+  reclaim_policy      = "Retain"
+
+  parameters = {
+    provisioningMode = "efs-ap"
+    fileSystemId     = aws_efs_file_system.shared_home.id
+    directoryPerms   = "700"
+    basePath         = "/jira"
+    uid              = "2001"
+    gid              = "2001"
+  }
+
   depends_on = [aws_efs_mount_target.shared_home]
 }
 
