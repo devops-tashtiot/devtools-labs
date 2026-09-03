@@ -28,16 +28,16 @@ inputs = {
   # allowed type (m6i.xlarge, 3920m allocatable) turned out unable to ever
   # fit confluence's 4-core request. Net node count unchanged (2 + 1 = 3).
   #
-  # Raised from 2 to 4 (the configured max): with desired=2, the ASG only
-  # ever placed one node per AZ, and jira's local-home EBS PV is node-affinity
-  # -pinned to whichever AZ (il-central-1a) it first provisioned in. That
-  # single AZ-1a node ended up hosting nearly every AZ-1a-pinned workload
-  # (artifactory, harbor, argocd, cloudflared, rhbk, woodpecker, xray, minio,
-  # devops-api) and had no CPU headroom left for jira, which sat Pending
-  # indefinitely (no cluster-autoscaler runs in this cluster to react to
-  # that on its own). Scaling to 4 lets the ASG's AZ-balancing add a second
-  # node in il-central-1a.
-  node_desired_size = 4
+  # Was briefly raised from 2 to 4 to work around jira's local-home EBS PV
+  # being node-affinity-pinned to whichever AZ (il-central-1a) it first
+  # provisioned in: with desired=2, the ASG only ever placed one node per
+  # AZ, so that single AZ-1a node ended up hosting nearly every AZ-1a-pinned
+  # workload (artifactory, harbor, argocd, cloudflared, rhbk, woodpecker,
+  # xray, minio, devops-api) with no CPU headroom left for jira, which sat
+  # Pending indefinitely (no cluster-autoscaler runs in this cluster to
+  # react to that on its own). Reverted back to 2 per explicit request —
+  # if jira starts Pending again on an AZ-imbalanced node, that's why.
+  node_desired_size = 2
 
   # See terraform/modules/eks/variables.tf's node_large_instance_types
   # comment for why this second group exists. Left at the module's own
