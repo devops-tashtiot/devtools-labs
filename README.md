@@ -42,11 +42,6 @@ touching the rest, and `terragrunt run-all apply/destroy` from
 | `devtools-secrets` | Platform-wide SSM values not tied to any other unit: the shared initial admin password every devtool uses, and the shared RHBK OIDC client secret every devtool federates SSO through. |
 | `backup` | An AWS Backup vault + daily plan covering the RDS instance (by ARN) and anything tagged `BackupManaged=true` (currently the EFS shared-home filesystem), with a cross-region copy action landing a second copy in `us-east-1`. |
 
-There is also a `halbana_server` unit/module (`c5d.large`, On-Demand — Spot
-was tried and rejected because the box's NVMe instance store gets wiped on
-every Spot "stop" interruption) that is not part of the devtools platform
-proper and isn't covered by `docs/`; it looks like a standalone staging box.
-
 The Packer template that builds the Minikube-era golden AMI lives in its own
 repo, [`devops-tashtiot/minikube-ami`](https://github.com/devops-tashtiot/minikube-ami)
 — not needed for the current EKS path, which uses the standard EKS-optimized
@@ -259,9 +254,6 @@ flowchart TD
   instance types in both AZs, so `node_capacity_type` defaults to
   `ON_DEMAND`. (`capacity_type` is `ForceNew` on the node group, so
   revisiting this later means a full node replacement.)
-- `halbana_server`: `c5d.large`, also On-Demand rather than Spot — its NVMe
-  instance store was observed being wiped on every Spot "stop"
-  interruption, twice in one afternoon, each costing 20-30 minutes of rework.
 - `backup`: an AWS Backup vault with cross-region copy to `us-east-1` adds
   ongoing storage cost proportional to what's backed up (RDS + the EFS
   shared-home filesystem).

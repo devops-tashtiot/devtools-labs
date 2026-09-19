@@ -9,7 +9,7 @@ include "root" {
 locals {
   # Plain string, not a `dependency` block on the rds unit — matches this
   # repo's existing pattern of independent, parallel-applicable units (see
-  # rds/terragrunt.hcl's own comment on why it avoids depending on minikube).
+  # rds/terragrunt.hcl's own comment on why it avoids depending on eks).
   # RDS instance ARNs are deterministic from account/region/identifier, so no
   # actual cross-unit read is needed.
   rds_identifier = "devtools-rds"

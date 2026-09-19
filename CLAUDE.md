@@ -15,8 +15,7 @@ terraform/
 │   ├── domain-controller/       # terragrunt.hcl — standalone Windows AD EC2 instance
 │   ├── cloudflare/              # terragrunt.hcl — Cloudflare zone + DNS records + Access
 │   ├── devtools-secrets/        # terragrunt.hcl — platform-wide SSM secrets not tied to any other unit
-│   ├── backup/                  # terragrunt.hcl — AWS Backup vault + cross-region DR copy
-│   └── halbana_server/          # terragrunt.hcl — unrelated standalone staging box, not part of the devtools platform
+│   └── backup/                  # terragrunt.hcl — AWS Backup vault + cross-region DR copy
 └── modules/
     ├── eks/                      # EKS cluster, node groups, storage classes, IRSA, ArgoCD + both ApplicationSets
     ├── rds/                      # Postgres RDS instance + security group; publishes admin creds to SSM
@@ -24,20 +23,18 @@ terraform/
     ├── cloudflare/                # cloudflare_zone + cloudflare_dns_record + Access app; read-only tunnel lookup; Origin CA cert managed + published to SSM
     ├── devtools-secrets/          # aws_ssm_parameter for the shared admin password, RHBK OIDC client secret, and Cloudflare Origin CA root cert
     ├── backup/                    # aws_backup_vault (primary + DR) covering RDS and BackupManaged=true-tagged resources
-    ├── halbana_server/            # unrelated EC2 module, On-Demand only
     └── minikube/                  # vestigial — no live unit sources this anymore (see migration note above)
 ```
 
 **eks module scope:** creates the cluster, node groups, storage, IRSA roles, installs ArgoCD via Helm, and registers exactly two app-of-apps `Applications` (`clusters-applicationset` then `devtools-applicationset`, see "What the Modules Provision" below) — nothing else. `nginx-ingress`, `cloudflared`, `external-secrets-operator`, and `rhbk` are GitOps-managed via `clusters-provision`/`clusters-definition`, not Terraform, same as before.
 
-## Six independent units (plus one unrelated) — not a dependency chain
+## Six independent units — not a dependency chain
 
 `eks`, `rds`, `domain-controller`, `cloudflare`, `devtools-secrets`, and `backup` are six separate Terragrunt units under `terraform/live/devtools`, and **none has a `dependency` block on any other**:
 
 - Any one can be applied, destroyed, or rebuilt without touching the others.
 - `terragrunt run-all apply`/`destroy` from `terraform/live/devtools` runs all six **in parallel** — no ordering to wait on.
 - `eks`, `rds`, and `domain-controller` reuse the account's existing spoke subnets (`subnet_tag_filter = "spokeSubnet"`) by convention, not by Terraform reference — no new VPC/NAT/EIP is created (this account's SCPs block that anyway). `cloudflare` doesn't touch AWS at all — different provider, different account. `devtools-secrets` is pure SSM. All independent by construction, not just convention.
-- `halbana_server` is a seventh unit in the same directory, but it is **not part of the devtools platform** and isn't covered by `docs/` — a standalone staging box (`c5d.large`, On-Demand only: Spot was tried and rejected because its NVMe instance store gets wiped on every Spot "stop" interruption).
 
 ## Five-Repo GitOps Architecture
 
@@ -97,9 +94,6 @@ Each `-provision`/`-definition` pair has its own `ApplicationSet`, following the
 2. Covers the RDS instance (by ARN) and anything tagged `BackupManaged=true` (currently the EFS shared-home filesystem from the `eks` module), on a daily plan with a cross-region copy action.
 3. **Not Vault-Locked yet, by deliberate choice** — left unlocked so behavior can be observed first. Locking later (`aws_backup_vault_lock_configuration`) is a one-way door if COMPLIANCE mode is used (irreversible for `min_retention_days`, not even by root/AWS support) — confirm that tradeoff explicitly before adding it; GOVERNANCE mode (`changeable_for_days` set) stays overridable within that window.
 
-**halbana_server module (not part of the devtools platform):**
-1. A standalone `c5d.large` EC2 instance, `enable_spot = false` in its `terragrunt.hcl` — deliberately On-Demand. Spot was tried and rejected: its NVMe instance store does **not** survive a Spot "stop" interruption, and this was observed happening twice in one afternoon, costing 20-30 minutes of rework each time.
-
 ## Prerequisites
 
 **`/devops/prerequisite/generic-password` (SecureString)** — the one shared password a human sets by hand before the first apply of `rds`, `domain-controller`, or `devtools-secrets`. It is read via a `data "aws_ssm_parameter"` lookup and republished by each module to its own `terraform-created` path (RDS master password, domain-controller admin/DSRM password, the shared devtools admin password). **No `TF_VAR_*` export is needed anymore for any of these** — this replaced the old per-module interactive password prompts. The only `sensitive` Terraform variable left anywhere in this repo (`domain-controller`'s `sample_user_password`) has a hardcoded default, so it never prompts either.
@@ -155,7 +149,7 @@ terragrunt apply   # slow — creates the cluster/node groups, installs ArgoCD, 
 
 ### Applying all six units together
 
-`terraform/live/devtools` has these six platform units plus the unrelated `halbana_server`, so a plain `terragrunt run-all` from that directory applies/destroys all of them — no scoping needed (pass `--terragrunt-exclude-dir=halbana_server` if you want to leave that one out). Since none depends on another, they run in parallel. No unit prompts interactively anymore (see Prerequisites) as long as `/devops/prerequisite/generic-password` is already set in SSM.
+`terraform/live/devtools` has these six platform units, so a plain `terragrunt run-all` from that directory applies/destroys all of them — no scoping needed. Since none depends on another, they run in parallel. No unit prompts interactively anymore (see Prerequisites) as long as `/devops/prerequisite/generic-password` is already set in SSM.
 
 ```bash
 cd terraform/live/devtools
@@ -164,7 +158,7 @@ terragrunt run-all apply      # apply (interactive approval)
 terragrunt run-all destroy
 ```
 
-**Cost note:** `rds` defaults to `db.t3.small` (autoscaling storage — not the smallest free-tier size). `domain-controller` defaults to `t3.small` (~$15/mo, **not** free-tier) and `instance_enabled = true` — running `run-all apply` creates it; set `instance_enabled = false` first if you only want other pieces. `eks`'s node groups run **On-Demand, not Spot** (see eks module notes above) — this is the most expensive unit in the repo. `halbana_server` also runs On-Demand. `backup` adds ongoing cross-region storage cost proportional to what's backed up.
+**Cost note:** `rds` defaults to `db.t3.small` (autoscaling storage — not the smallest free-tier size). `domain-controller` defaults to `t3.small` (~$15/mo, **not** free-tier) and `instance_enabled = true` — running `run-all apply` creates it; set `instance_enabled = false` first if you only want other pieces. `eks`'s node groups run **On-Demand, not Spot** (see eks module notes above) — this is the most expensive unit in the repo. `backup` adds ongoing cross-region storage cost proportional to what's backed up.
 
 ## Adding a New Service
 
@@ -215,5 +209,5 @@ aws ssm start-session --target <instance-id>
 - **No AWS load balancer** — `cloudflared` dials out to Cloudflare; `nginx-ingress` is ClusterIP. Zero LB cost.
 - **ArgoCD runs insecure** (`--insecure` flag) — TLS is terminated at Cloudflare; acceptable for a dev platform.
 - **No new VPC/NAT/EIP** — `eks`, `rds`, and `domain-controller` all reuse the account's existing spoke subnets; this account's Horizon LZ SCPs block creating those resources outright regardless.
-- **On-Demand over Spot for `eks` node groups and `halbana_server`** — both hit real Spot failure modes in practice (capacity exhaustion for `eks`; instance-store wipe on interruption for `halbana_server`), not a default/oversight.
+- **On-Demand over Spot for `eks` node groups** — hit a real Spot failure mode in practice (capacity exhaustion), not a default/oversight.
 - **One shared prerequisite password (`generic-password`) instead of per-module secrets** — deliberate simplification; this platform doesn't need per-resource credentials, and it collapses what used to be three separate interactive `TF_VAR_*` prompts into one SSM parameter set once.

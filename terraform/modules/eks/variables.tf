@@ -34,13 +34,13 @@ variable "node_group_kubernetes_version" {
 }
 
 variable "vpc_id" {
-  description = "Explicit VPC ID. Leave empty to auto-discover the first VPC in the account — matches minikube/rds's own convention."
+  description = "Explicit VPC ID. Leave empty to auto-discover the first VPC in the account — matches rds/domain-controller's own convention."
   type        = string
   default     = ""
 }
 
 variable "subnet_tag_filter" {
-  description = "Tag Name wildcard filter for the target subnets — same spokeSubnet1/spokeSubnet2 pair minikube/rds already use. No new NAT Gateway or VPC change: these subnets' existing 0.0.0.0/0 route (through a pre-existing shared VPC endpoint) is reused as-is."
+  description = "Tag Name wildcard filter for the target subnets — same spokeSubnet1/spokeSubnet2 pair rds/domain-controller already use. No new NAT Gateway or VPC change: these subnets' existing 0.0.0.0/0 route (through a pre-existing shared VPC endpoint) is reused as-is."
   type        = string
   default     = "spokeSubnet"
 }
@@ -125,7 +125,7 @@ variable "clusters_definition_repo" {
 }
 
 variable "coredns_rewrite_hosts" {
-  description = "Hostnames rewritten straight to ingress-nginx-controller's ClusterIP for in-cluster callers, via the coredns-custom ConfigMap (EKS's supported CoreDNS extension point). Same list minikube's user_data currently hardcodes — kept as a variable here so it's a one-line change instead of an embedded script edit."
+  description = "Hostnames rewritten straight to ingress-nginx-controller's ClusterIP for in-cluster callers, via the coredns-custom ConfigMap (EKS's supported CoreDNS extension point). Same list minikube's (vestigial) user_data used to hardcode — kept as a variable here so it's a one-line change instead of an embedded script edit."
   type        = list(string)
   default = [
     "bitbucket.devopstashtiot.page",

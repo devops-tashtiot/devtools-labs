@@ -105,7 +105,8 @@ data "http" "devtools_application_yaml" {
 
 # [5/6] Register the clusters ApplicationSet (app-of-apps) first — devtools
 # depend on cluster-level infra (e.g. bitbucket's ExternalSecret needs
-# external-secrets-operator running), same ordering minikube's user_data uses.
+# external-secrets-operator running), same ordering minikube's (vestigial)
+# user_data used.
 resource "kubectl_manifest" "clusters_applicationset" {
   yaml_body = data.http.clusters_application_yaml.response_body
 

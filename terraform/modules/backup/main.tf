@@ -1,8 +1,8 @@
 # AWS Backup — a second, independent layer on top of RDS's own automated
-# backups and the minikube module's DLM policy. Both of those live inside
-# the same account under the same broad admin role that deleted everything
-# in the first place (an accidental or deliberate rds:DeleteDBSnapshot /
-# ec2:DeleteSnapshot from that role can still remove them). AWS Backup gives
+# backups. Those live inside the same account under the same broad admin
+# role that deleted everything in the first place (an accidental or
+# deliberate rds:DeleteDBSnapshot / ec2:DeleteSnapshot from that role can
+# still remove them). AWS Backup gives
 # one place to later apply Vault Lock (compliance or governance mode, see
 # below) — a protection that holds even against the account's own admins,
 # which nothing else in this repo provides.
@@ -86,10 +86,9 @@ resource "aws_backup_plan" "this" {
 
 # Two selection mechanisms on purpose: the RDS instance is targeted directly
 # by ARN (there's exactly one, no ambiguity), while anything else opted in
-# (the minikube EBS data volume) is targeted by tag — matches the same
-# tag-based pattern the minikube module's own DLM policy already uses for
-# target_tags, so a future additional volume/resource just needs the tag,
-# not a Terraform change here.
+# (e.g. the eks module's EFS shared-home filesystem) is targeted by tag, so
+# a future additional volume/resource just needs the tag, not a Terraform
+# change here.
 resource "aws_backup_selection" "this" {
   name         = "${var.project_name}-backup-selection"
   plan_id      = aws_backup_plan.this.id

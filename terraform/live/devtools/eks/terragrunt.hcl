@@ -11,9 +11,9 @@ inputs = {
   kubernetes_version = "1.36"
   upgrade_policy     = "STANDARD"
 
-  # Same spokeSubnet1/spokeSubnet2 pair minikube/rds already use — no new
-  # NAT/VPC resource; their existing 0.0.0.0/0 route through a pre-existing
-  # shared VPC endpoint is reused as-is.
+  # Same spokeSubnet1/spokeSubnet2 pair rds/domain-controller already use —
+  # no new NAT/VPC resource; their existing 0.0.0.0/0 route through a
+  # pre-existing shared VPC endpoint is reused as-is.
   vpc_id            = ""
   subnet_tag_filter = "spokeSubnet"
 

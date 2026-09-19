@@ -40,7 +40,7 @@ variable "rds_instance_arn" {
 }
 
 variable "backup_target_tag_key" {
-  description = "Tag key AWS Backup's resource selection matches on, for any additional resource (e.g. the minikube EBS data volume) opted in by tag rather than by explicit ARN. Matches the key the resource itself must carry with backup_target_tag_value."
+  description = "Tag key AWS Backup's resource selection matches on, for any additional resource (e.g. the eks module's EFS shared-home filesystem) opted in by tag rather than by explicit ARN. Matches the key the resource itself must carry with backup_target_tag_value."
   type        = string
   default     = "BackupManaged"
 }

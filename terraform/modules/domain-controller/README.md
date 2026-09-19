@@ -126,8 +126,8 @@ needed for the primary path):
   Unlike the `minikube` module, there's no service here that needs re-starting after boot —
   AD DS is a native Windows service and comes up on its own.
 - `instance_enabled = false` tears the instance (and the `ldap-connection-url` SSM parameter)
-  down completely, independent of the `minikube`/`rds` units — see `devtools-labs/CLAUDE.md`'s
-  "three independent units" note.
+  down completely, independent of the `eks`/`rds` units — see `devtools-labs/CLAUDE.md`'s
+  "Six independent units" note.
 
 ## Known issues fixed in this pass
 
