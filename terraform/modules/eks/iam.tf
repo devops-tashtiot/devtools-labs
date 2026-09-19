@@ -62,11 +62,8 @@ resource "aws_iam_role_policy_attachment" "efs_csi" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"
 }
 
-# Replaces the node-wide IMDS role pattern minikube used (every pod on the
-# node could read /devtools/* via the instance profile) with a role scoped to
-# exactly the external-secrets ServiceAccount — the EKS least-privilege best
-# practice. Same SSM policy shape as
-# devtools-labs/terraform/modules/minikube/iam.tf's ssm_parameter_store_read.
+# Scoped via IRSA to exactly the external-secrets ServiceAccount (not a
+# node-wide IMDS role) — the EKS least-privilege best practice.
 resource "aws_iam_role" "external_secrets" {
   name_prefix        = "${var.cluster_name}-external-secrets-"
   assume_role_policy = data.aws_iam_policy_document.irsa_assume_role["external_secrets"].json

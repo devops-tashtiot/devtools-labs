@@ -52,7 +52,7 @@ variable "node_instance_types" {
 }
 
 variable "node_capacity_type" {
-  description = "SPOT or ON_DEMAND. Defaults to ON_DEMAND: the first real apply of this module hit repeated 'UnfulfillableCapacity' Spot launch failures for all three node_instance_types across both AZs (confirmed via the ASG's own scaling-activity log, retrying every ~2 minutes with zero instances ever launched) — the same Spot depletion minikube's own terragrunt.hcl already documented and worked around by running On-Demand. capacity_type is ForceNew on aws_eks_node_group, so revisiting this later means a full node group replacement, same as this one was."
+  description = "SPOT or ON_DEMAND. Defaults to ON_DEMAND: the first real apply of this module hit repeated 'UnfulfillableCapacity' Spot launch failures for all three node_instance_types across both AZs (confirmed via the ASG's own scaling-activity log, retrying every ~2 minutes with zero instances ever launched). capacity_type is ForceNew on aws_eks_node_group, so revisiting this later means a full node group replacement."
   type        = string
   default     = "ON_DEMAND"
 }
@@ -94,7 +94,7 @@ variable "node_large_desired_size" {
 }
 
 variable "endpoint_public_access" {
-  description = "Whether the EKS API server endpoint is reachable from outside the VPC. Needed here because this repo's Terraform (and this session's own kubectl access) runs from outside the VPC, unlike minikube's bootstrap, which ran user_data ON the instance itself. Still gated by IAM — a public endpoint doesn't grant access to anyone without a valid AWS credential AND an EKS access entry."
+  description = "Whether the EKS API server endpoint is reachable from outside the VPC. Needed here because this repo's Terraform (and this session's own kubectl access) runs from outside the VPC. Still gated by IAM — a public endpoint doesn't grant access to anyone without a valid AWS credential AND an EKS access entry."
   type        = bool
   default     = true
 }
@@ -125,7 +125,7 @@ variable "clusters_definition_repo" {
 }
 
 variable "coredns_rewrite_hosts" {
-  description = "Hostnames rewritten straight to ingress-nginx-controller's ClusterIP for in-cluster callers, via the coredns-custom ConfigMap (EKS's supported CoreDNS extension point). Same list minikube's (vestigial) user_data used to hardcode — kept as a variable here so it's a one-line change instead of an embedded script edit."
+  description = "Hostnames rewritten straight to ingress-nginx-controller's ClusterIP for in-cluster callers, via the coredns-custom ConfigMap (EKS's supported CoreDNS extension point) — kept as a variable here so it's a one-line change instead of an embedded script edit."
   type        = list(string)
   default = [
     "bitbucket.devopstashtiot.page",

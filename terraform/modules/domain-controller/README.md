@@ -123,8 +123,8 @@ needed for the primary path):
 - `t3.small` is **not free-tier**, roughly $15/month while running.
 - Nightly auto-stop via EventBridge Scheduler at 21:00 `Asia/Jerusalem` — there's no matching
   auto-start; start it manually (console, `aws ec2 start-instances`, or SSM) when you need it.
-  Unlike the `minikube` module, there's no service here that needs re-starting after boot —
-  AD DS is a native Windows service and comes up on its own.
+  AD DS is a native Windows service and comes up on its own after boot — no manual
+  re-start step needed.
 - `instance_enabled = false` tears the instance (and the `ldap-connection-url` SSM parameter)
   down completely, independent of the `eks`/`rds` units — see `devtools-labs/CLAUDE.md`'s
   "Six independent units" note.

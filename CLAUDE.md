@@ -2,7 +2,7 @@
 
 This repo provisions the infra behind the devtools platform: a multi-node **EKS** cluster (with ArgoCD bootstrapped inside it), an RDS Postgres instance, a standalone Windows AD domain controller, Cloudflare zone/DNS/Access, and AWS Backup coverage. It uses Terragrunt to drive Terraform modules.
 
-> **Migration note:** this repo used to run a single-EC2 Minikube cluster (module `minikube`). It has since migrated to a real multi-node EKS cluster (module `eks`). The `terraform/modules/minikube` directory and its `minikube-ami` dependency still exist in the tree but are **no longer referenced by any live unit** — treat them as vestigial unless you're intentionally reviving that path. Full architecture/bootstrap detail also lives in [`docs/`](docs/), published at https://devops-tashtiot.github.io/devtools-labs/, and is summarized in the repo [`README.md`](README.md).
+Full architecture/bootstrap detail also lives in [`docs/`](docs/), published at https://devops-tashtiot.github.io/devtools-labs/, and is summarized in the repo [`README.md`](README.md).
 
 ## Repository Structure
 
@@ -22,8 +22,7 @@ terraform/
     ├── domain-controller/        # Windows Server 2022 EC2 + AD forest bootstrap; publishes admin/LDAP-bind creds to SSM
     ├── cloudflare/                # cloudflare_zone + cloudflare_dns_record + Access app; read-only tunnel lookup; Origin CA cert managed + published to SSM
     ├── devtools-secrets/          # aws_ssm_parameter for the shared admin password, RHBK OIDC client secret, and Cloudflare Origin CA root cert
-    ├── backup/                    # aws_backup_vault (primary + DR) covering RDS and BackupManaged=true-tagged resources
-    └── minikube/                  # vestigial — no live unit sources this anymore (see migration note above)
+    └── backup/                    # aws_backup_vault (primary + DR) covering RDS and BackupManaged=true-tagged resources
 ```
 
 **eks module scope:** creates the cluster, node groups, storage, IRSA roles, installs ArgoCD via Helm, and registers exactly two app-of-apps `Applications` (`clusters-applicationset` then `devtools-applicationset`, see "What the Modules Provision" below) — nothing else. `nginx-ingress`, `cloudflared`, `external-secrets-operator`, and `rhbk` are GitOps-managed via `clusters-provision`/`clusters-definition`, not Terraform, same as before.
@@ -59,7 +58,7 @@ Each `-provision`/`-definition` pair has its own `ApplicationSet`, following the
 2. **`node_capacity_type` defaults to `ON_DEMAND`, not Spot** — the first real apply hit repeated `UnfulfillableCapacity` errors trying Spot across all three instance types in both AZs (confirmed via the ASG's own scaling-activity log). `capacity_type` is `ForceNew` on `aws_eks_node_group`, so revisiting this later means a full node group replacement.
 3. Storage: a `gp3` EBS storage class (per-node), an EFS filesystem + `efs-sc` `ReadWriteMany` storage class (Bitbucket/Jira/Confluence shared-home), plus static-provisioning EFS storage classes per tool (`efs_static_bitbucket`/`efs_static_confluence`/`efs_static_jira`).
 4. IRSA (not node-wide IMDS creds) for `external-secrets`, the EBS CSI driver, and the EFS CSI driver — dedicated IAM roles in `iam.tf`, not shared with node instance roles.
-5. Installs ArgoCD via Helm (`server.insecure = true`, `ClusterIP`, `dex`/`redis-ha`/`notifications` disabled) sized for managing ~19 real Applications (4 cluster-infra + ~15 devtools) — the controller was originally sized for minikube's bootstrap-only initial state and OOMKilled (exit 137) the moment `devtools-applicationset` registered and gave it a real resource tree to manage; controller limits are now 1000m CPU / 1536Mi memory.
+5. Installs ArgoCD via Helm (`server.insecure = true`, `ClusterIP`, `dex`/`redis-ha`/`notifications` disabled) sized for managing ~19 real Applications (4 cluster-infra + ~15 devtools) — the controller initially OOMKilled (exit 137) the moment `devtools-applicationset` registered and gave it a real resource tree to manage; controller limits are now 1000m CPU / 1536Mi memory.
 6. Registers `clusters-applicationset` (app-of-apps, fetched via `data.http` from the `clusters-definition` repo's `application.yaml`), then a `null_resource` with a `local-exec` provisioner runs `aws eks update-kubeconfig` and polls `kubectl get application.argoproj.io <app>` for `ingress-nginx`, `cloudflared`, `external-secrets-operator`, `rhbk` until each reports **Health = Healthy** (Sync status is deliberately not gated on — a controller that writes back to its own git-declared resources after creation can leave a permanent, harmless OutOfSync that would otherwise block forever; observed live on `ingress-nginx`'s Helm-hook admission Job and `rhbk`'s Keycloak-operator-owned admin Secret during this cluster's first bootstrap).
 7. Registers `devtools-applicationset` last (same `data.http` + `kubectl_manifest` pattern, from `devtools-definition`'s `application.yaml`) — from here on, ArgoCD itself deploys everything else, including the ArgoCD `Ingress`, as regular devtools.
 
@@ -121,7 +120,7 @@ aws ssm put-parameter \
   --profile 342831714456_Workload-Admin-PS \
   --region il-central-1
 ```
-The path must match `tunnelCredentialsSsmParameter` in `devtools-definition/devtools/cloudflared/values.yaml`, and fall under the `arn:aws:ssm:*:*:parameter/devtools/*` prefix the EKS node/IRSA role is allowed to read.
+The path must match `tunnelCredentialsSsmParameter` in `devtools-definition/devtools/cloudflared/values.yaml`, and fall under the `arn:aws:ssm:*:*:parameter/devops/*` prefix the `external-secrets` IRSA role is allowed to read (see `terraform/modules/eks/iam.tf`'s `external_secrets_ssm_read` policy).
 
 **Cloudflare Origin CA certificate in SSM Parameter Store** — two `SecureString`s, `/devops/terraform-created/cloudflare/origin-cert-crt` and `/devops/terraform-created/cloudflare/origin-cert-key` (already populated), consumed by `clusters-provision/clusters/ingress-nginx`'s `origin-cert-secret.yaml` so `cloudflared` can connect to nginx-ingress over real HTTPS instead of plain HTTP. The private key was generated locally (never sent to Cloudflare — only a CSR derived from it was), so there's no `put-parameter` rotation snippet here the way there is for tunnel credentials; regenerate both via a fresh CSR/cert if the key is ever compromised. Separately, the **root CA cert** (public, not sensitive) is republished by the `devtools-secrets` module at `/devops/terraform-created/cloudflare/origin-ca-root-cert` for devtool JVM truststores.
 
@@ -136,7 +135,7 @@ curl -s "https://api.cloudflare.com/client/v4/certificates?zone_id=148024e9103dc
 
 **Bitbucket push access** — Bitbucket is the sole source of truth for `devops-tashtiot` app repos; developers push directly into it over HTTPS at the same `bitbucket.devopstashtiot.page` hostname the web UI uses (no dedicated hostname or `cloudflared` ingress rule needed — plain HTTPS through the existing catch-all rule). Since a `git push` can't go through Access's browser email-OTP flow, it authenticates with a service token (`cloudflare_zero_trust_access_service_token.bitbucket_push`, published to `/devops/terraform-created/cloudflare/wildcard-access-otp-bypass-client-id`/`-client-secret`) sent as `CF-Access-Client-Id`/`CF-Access-Client-Secret` headers, via a non-identity policy on the shared `*.devopstashtiot.page` wildcard Access application — both in `terraform/modules/cloudflare/main.tf`. Full client-side usage is in the top-level `devops/CLAUDE.md`'s "Bitbucket push access" section.
 
-**The `eks` unit needs no pre-existing AMI** — unlike the old `minikube` module, it uses the standard EKS-optimized AL2023 AMI that EKS resolves itself for its managed node groups. The `minikube-ami` repo/Packer template is only relevant if the vestigial `minikube` module is ever revived.
+**The `eks` unit needs no pre-existing AMI** — it uses the standard EKS-optimized AL2023 AMI that EKS resolves itself for its managed node groups.
 
 ## Apply Workflow
 

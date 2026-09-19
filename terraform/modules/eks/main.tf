@@ -1,5 +1,5 @@
-# EKS cluster — real multi-node/multi-AZ replacement for the single Minikube
-# EC2 instance. Node group spans both existing spoke subnets (no new NAT/VPC
+# EKS cluster — real multi-node/multi-AZ cluster. Node group spans both
+# existing spoke subnets (no new NAT/VPC
 # resource — their 0.0.0.0/0 route already goes through a pre-existing shared
 # VPC endpoint, confirmed live against this account before this module was
 # written). Spot Managed Node Group, not Karpenter: this workload is a fixed,
@@ -40,11 +40,9 @@ module "eks" {
   # terraform-aws-modules/eks/aws's default node security group only opens
   # node-to-node traffic on ephemeral ports (1025-65535), DNS (53), and a
   # handful of control-plane webhook ports — NOT arbitrary ports below 1025.
-  # Never mattered on the single-instance Minikube EC2 this cluster replaced
-  # (one node means every pod-to-pod call is local, never crosses a security
-  # group boundary), but on this real multi-node cluster it silently breaks
-  # any cross-node call to a Service listening below 1025 — concretely,
-  # ingress-nginx-controller's 80/443. Since every clusters-definition/
+  # On this multi-node cluster that silently breaks any cross-node call to a
+  # Service listening below 1025 — concretely, ingress-nginx-controller's
+  # 80/443. Since every clusters-definition/
   # clusters/rhbk/values.yaml-driven *.devopstashtiot.page hostname resolves
   # in-cluster straight to that Service via the CoreDNS rewrite (coredns.tf),
   # any backend-to-backend call to one of those hostnames (e.g. Confluence's
@@ -370,11 +368,9 @@ resource "kubernetes_storage_class" "efs_static_jira" {
 # scoped only to the internal Origin CA (not whatever public CA actually
 # signed Cloudflare's edge cert), every such call fails with "certificate
 # signed by unknown authority" even though the TLS handshake itself is
-# otherwise fine. host.minikube.internal is dropped (Docker-driver-only,
-# dead weight on EKS). The per-consumer ArgoCD wildcard is a deliberate
-# exception, same as minikube's version: no Ingress rule exists for
-# arbitrary *.argocd subdomains, so it routes straight to the one real
-# argocd-server.
+# otherwise fine. The per-consumer ArgoCD wildcard is a deliberate
+# exception: no Ingress rule exists for arbitrary *.argocd subdomains, so
+# it routes straight to the one real argocd-server.
 locals {
   coredns_rewrites = join("\n    ", concat(
     [

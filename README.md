@@ -14,17 +14,6 @@ are published as an MkDocs Material site at
 **https://devops-tashtiot.github.io/devtools-labs/** — run `mkdocs serve`
 from the repo root for a local copy (`pip install mkdocs-material` first).
 
-> **Note on staleness:** the repo-root `CLAUDE.md` still describes an older
-> single-EC2-instance "Minikube + ArgoCD" architecture (five Terragrunt
-> units: `minikube`, `rds`, `domain-controller`, `cloudflare`,
-> `devtools-secrets`). The codebase has since migrated to a real multi-node
-> EKS cluster (six units, see below) — the `docs/` folder and the actual
-> `terraform/live/devtools` directory reflect this newer state; `CLAUDE.md`
-> does not yet. A `terraform/modules/minikube` module still exists in the
-> tree but is no longer referenced by any live unit. Treat `docs/` and the
-> actual Terraform code as the source of truth over `CLAUDE.md` until it's
-> updated.
-
 ## 1. Architecture
 
 Six independent Terragrunt units live under `terraform/live/devtools`, each
@@ -42,10 +31,8 @@ touching the rest, and `terragrunt run-all apply/destroy` from
 | `devtools-secrets` | Platform-wide SSM values not tied to any other unit: the shared initial admin password every devtool uses, and the shared RHBK OIDC client secret every devtool federates SSO through. |
 | `backup` | An AWS Backup vault + daily plan covering the RDS instance (by ARN) and anything tagged `BackupManaged=true` (currently the EFS shared-home filesystem), with a cross-region copy action landing a second copy in `us-east-1`. |
 
-The Packer template that builds the Minikube-era golden AMI lives in its own
-repo, [`devops-tashtiot/minikube-ami`](https://github.com/devops-tashtiot/minikube-ami)
-— not needed for the current EKS path, which uses the standard EKS-optimized
-AL2023 AMI resolved by EKS itself.
+`eks` needs no pre-existing AMI — it uses the standard EKS-optimized AL2023 AMI
+resolved by EKS itself for its managed node groups.
 
 ### What Terraform does *not* do
 
@@ -336,4 +323,4 @@ fast-moving detail:
 - [`docs/cloudflare-limitations.md`](docs/cloudflare-limitations.md) — Cloudflare gotchas and incidents
 - [`docs/ssm-parameters.md`](docs/ssm-parameters.md) — every SSM parameter, who creates/reads it
 - [`docs/post-devtools-implementation/`](docs/post-devtools-implementation/) — per-devtool manual setup, one folder per tool
-- `CLAUDE.md` (repo root) — the module structure and design-decision writeup Claude Code reads; currently describes the older Minikube-based architecture (see the note at the top of this file) rather than the current EKS one, so cross-check it against `docs/` and the actual `terraform/` tree rather than trusting it standalone for architecture.
+- `CLAUDE.md` (repo root) — the module structure and design-decision writeup Claude Code reads, kept current with the EKS-based architecture described here.

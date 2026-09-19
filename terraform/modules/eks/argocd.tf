@@ -1,7 +1,7 @@
-# ArgoCD bootstrap — reproduces devtools-labs/terraform/modules/minikube/main.tf's
-# steps [4/6]-[6/6] via this module's own helm/kubectl/http providers instead of
-# a bash user_data script, since Terraform here runs from outside the VPC (this
-# session's own shell), not from a process running on the cluster's own node.
+# ArgoCD bootstrap — via this module's own helm/kubectl/http providers
+# instead of a bash user_data script, since Terraform here runs from outside
+# the VPC (this session's own shell), not from a process running on the
+# cluster's own node.
 
 resource "helm_release" "argocd" {
   name             = "argocd"
@@ -55,11 +55,10 @@ resource "helm_release" "argocd" {
         limits   = { cpu = "200m", memory = "256Mi" }
       }
     }
-    # Sized for managing ~19 real Applications (4 cluster-infra + 15 devtools),
-    # not minikube's minimal bootstrap-only initial state this whole values
-    # block was originally copied from — the controller OOMKilled repeatedly
-    # (exit 137) at the original 512Mi limit the moment the devtools
-    # ApplicationSet registered and it had a real resource tree to manage.
+    # Sized for managing ~19 real Applications (4 cluster-infra + 15 devtools)
+    # — the controller OOMKilled repeatedly (exit 137) at the original 512Mi
+    # limit the moment the devtools ApplicationSet registered and it had a
+    # real resource tree to manage.
     controller = {
       replicas  = 1
       resources = {
@@ -105,8 +104,7 @@ data "http" "devtools_application_yaml" {
 
 # [5/6] Register the clusters ApplicationSet (app-of-apps) first — devtools
 # depend on cluster-level infra (e.g. bitbucket's ExternalSecret needs
-# external-secrets-operator running), same ordering minikube's (vestigial)
-# user_data used.
+# external-secrets-operator running).
 resource "kubectl_manifest" "clusters_applicationset" {
   yaml_body = data.http.clusters_application_yaml.response_body
 
@@ -117,9 +115,8 @@ resource "kubectl_manifest" "clusters_applicationset" {
 # generates is Healthy, before registering devtools — its ArgoCD OIDC values
 # depend on rhbk's client already existing.
 #
-# Health only, not Sync+Health (minikube's user_data originally required
-# both): a controller/operator that writes back to one of its own
-# git-declared resources after creation causes a real, permanent OutOfSync
+# Health only, not Sync+Health: a controller/operator that writes back to
+# one of its own git-declared resources after creation causes a real, permanent OutOfSync
 # that never resolves even though the app is fully functional — observed
 # live on two separate apps during this cluster's own first bootstrap:
 # ingress-nginx's Helm-hook admission Job, and rhbk's Keycloak-operator-owned
