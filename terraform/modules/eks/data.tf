@@ -25,3 +25,13 @@ data "aws_subnets" "target" {
     values = ["*${var.subnet_tag_filter}*"]
   }
 }
+
+# The Workload-Admin-PS SSO role that gets cluster admin (main.tf's
+# access_entries). Matched by name prefix, not a hardcoded ARN: IAM Identity
+# Center appends a random suffix that changes whenever the permission set is
+# re-provisioned. one() fails the plan loudly if the match is ever ambiguous
+# or missing, instead of silently granting admin to the wrong role.
+data "aws_iam_roles" "workload_admin" {
+  name_regex  = "^AWSReservedSSO_Workload-Admin-PS_[0-9a-f]+$"
+  path_prefix = "/aws-reserved/sso.amazonaws.com/"
+}

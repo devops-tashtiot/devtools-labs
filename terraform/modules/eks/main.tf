@@ -71,13 +71,32 @@ module "eks" {
     support_type = var.upgrade_policy
   }
 
-  # v21 defaults this to false (a deliberate move away from an implicit
-  # grant) — without it, the IAM principal that actually runs Terraform has
-  # no Kubernetes RBAC access at all, which is exactly what broke the first
-  # real apply: node group + addons (AWS-API-managed) succeeded fine, but
-  # every kubernetes/kubectl-provider resource (StorageClasses, the
-  # coredns-custom ConfigMap) failed with a plain "Unauthorized".
-  enable_cluster_creator_admin_permissions = true
+  # Cluster admin is granted explicitly to the Workload-Admin-PS SSO role
+  # (looked up by name in data.tf), not via enable_cluster_creator_admin_permissions.
+  # The creator grant pinned whatever role ARN ran the first apply — and SSO
+  # permission-set roles get a new random suffix whenever the permission set
+  # is re-provisioned. That happened here: the access entry still pointed at
+  # AWSReservedSSO_Workload-Admin-PS_e950bebc1e49b606 after IAM had replaced
+  # it with a new suffix, locking every operator (and this repo's own
+  # kubernetes-provider resources) out with "Unauthorized". Resolving the
+  # role by name means the next apply follows any future suffix change.
+  # Must stay false while access_entries covers the same role — EKS rejects
+  # two access entries for one principal.
+  enable_cluster_creator_admin_permissions = false
+
+  access_entries = {
+    workload_admin = {
+      principal_arn = one(data.aws_iam_roles.workload_admin.arns)
+      policy_associations = {
+        cluster_admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
 
   addons = {
     vpc-cni = {
